@@ -877,6 +877,184 @@ async def gmp_relationships(db: Session = Depends(get_db)):
     }
 
 
+# ------------ Allocation Override APIs ------------
+
+@app.get("/api/gmp/allocations/{gmp_division}")
+async def get_gmp_allocation(gmp_division: str, db: Session = Depends(get_db)):
+    """Get current allocation values for a GMP division."""
+    from app.models import GMPAllocationOverride
+
+    override = db.query(GMPAllocationOverride).filter(
+        GMPAllocationOverride.gmp_division == gmp_division
+    ).first()
+
+    # Get computed values from reconciliation
+    result = run_full_reconciliation(db)
+    computed_west = 0
+    computed_east = 0
+    gmp_total = 0
+
+    for row in result['recon_rows']:
+        if row['gmp_division'] == gmp_division:
+            computed_west = row.get('actual_west_raw', 0)
+            computed_east = row.get('actual_east_raw', 0)
+            gmp_total = row.get('gmp_amount_raw', 0)
+            break
+
+    return {
+        'gmp_division': gmp_division,
+        'gmp_total': gmp_total,
+        'computed_west': computed_west,
+        'computed_east': computed_east,
+        'computed_total': computed_west + computed_east,
+        'override_west': override.amount_west_cents if override else None,
+        'override_east': override.amount_east_cents if override else None,
+        'has_override': override is not None,
+        'notes': override.notes if override else None
+    }
+
+
+@app.post("/api/gmp/allocations/{gmp_division}")
+async def save_gmp_allocation(
+    gmp_division: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Save allocation override for a GMP division.
+    Validates that West + East equals total computed amount.
+    """
+    from app.models import GMPAllocationOverride, AllocationChangeLog
+
+    data = await request.json()
+    amount_west = data.get('amount_west_cents')
+    amount_east = data.get('amount_east_cents')
+    notes = data.get('notes', '')
+
+    # Get existing override or create new
+    override = db.query(GMPAllocationOverride).filter(
+        GMPAllocationOverride.gmp_division == gmp_division
+    ).first()
+
+    old_west = override.amount_west_cents if override else None
+    old_east = override.amount_east_cents if override else None
+
+    if override:
+        # Log changes
+        if amount_west != old_west:
+            log = AllocationChangeLog(
+                gmp_division=gmp_division,
+                field_changed='amount_west',
+                old_value_cents=old_west,
+                new_value_cents=amount_west,
+                change_reason=notes
+            )
+            db.add(log)
+
+        if amount_east != old_east:
+            log = AllocationChangeLog(
+                gmp_division=gmp_division,
+                field_changed='amount_east',
+                old_value_cents=old_east,
+                new_value_cents=amount_east,
+                change_reason=notes
+            )
+            db.add(log)
+
+        override.amount_west_cents = amount_west
+        override.amount_east_cents = amount_east
+        override.notes = notes
+    else:
+        override = GMPAllocationOverride(
+            gmp_division=gmp_division,
+            amount_west_cents=amount_west,
+            amount_east_cents=amount_east,
+            notes=notes
+        )
+        db.add(override)
+
+        # Log creation
+        if amount_west is not None:
+            log = AllocationChangeLog(
+                gmp_division=gmp_division,
+                field_changed='amount_west',
+                old_value_cents=None,
+                new_value_cents=amount_west,
+                change_reason='Initial override'
+            )
+            db.add(log)
+
+        if amount_east is not None:
+            log = AllocationChangeLog(
+                gmp_division=gmp_division,
+                field_changed='amount_east',
+                old_value_cents=None,
+                new_value_cents=amount_east,
+                change_reason='Initial override'
+            )
+            db.add(log)
+
+    db.commit()
+
+    return {
+        'success': True,
+        'gmp_division': gmp_division,
+        'amount_west_cents': amount_west,
+        'amount_east_cents': amount_east
+    }
+
+
+@app.delete("/api/gmp/allocations/{gmp_division}")
+async def clear_gmp_allocation(gmp_division: str, db: Session = Depends(get_db)):
+    """Clear allocation override, reverting to computed values."""
+    from app.models import GMPAllocationOverride, AllocationChangeLog
+
+    override = db.query(GMPAllocationOverride).filter(
+        GMPAllocationOverride.gmp_division == gmp_division
+    ).first()
+
+    if override:
+        # Log clearing
+        log = AllocationChangeLog(
+            gmp_division=gmp_division,
+            field_changed='override_cleared',
+            old_value_cents=override.amount_west_cents,
+            new_value_cents=None,
+            change_reason='Override cleared, reverted to computed values'
+        )
+        db.add(log)
+        db.delete(override)
+        db.commit()
+        return {'success': True, 'message': 'Override cleared'}
+
+    return {'success': False, 'message': 'No override found'}
+
+
+@app.get("/api/gmp/allocation-history/{gmp_division}")
+async def get_allocation_history(gmp_division: str, db: Session = Depends(get_db)):
+    """Get change history for a GMP division's allocations."""
+    from app.models import AllocationChangeLog
+
+    logs = db.query(AllocationChangeLog).filter(
+        AllocationChangeLog.gmp_division == gmp_division
+    ).order_by(AllocationChangeLog.changed_at.desc()).limit(50).all()
+
+    return {
+        'gmp_division': gmp_division,
+        'history': [
+            {
+                'field': log.field_changed,
+                'old_value': log.old_value_cents,
+                'new_value': log.new_value_cents,
+                'reason': log.change_reason,
+                'changed_by': log.changed_by,
+                'changed_at': log.changed_at.isoformat() if log.changed_at else None
+            }
+            for log in logs
+        ]
+    }
+
+
 # ------------ Error Handlers ------------
 
 @app.exception_handler(Exception)

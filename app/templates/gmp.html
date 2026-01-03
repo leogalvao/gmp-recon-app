@@ -11,7 +11,7 @@
         padding-right: 1.5rem;
     }
 
-    /* Main layout container */
+    /* Main layout container - LOCKED */
     .gmp-layout {
         display: grid;
         grid-template-columns: 1fr 300px;
@@ -61,6 +61,72 @@
     /* Ensure table doesn't shrink below content */
     #gmp-table {
         min-width: 900px;
+    }
+
+    /* Editable cell styles */
+    .editable-cell {
+        cursor: pointer;
+        position: relative;
+        padding: 4px 8px;
+        border-radius: 4px;
+        border: 1px solid transparent;
+        transition: all 0.2s;
+    }
+    .editable-cell:hover {
+        background-color: #eff6ff;
+        border-color: #bfdbfe;
+    }
+    .editable-cell.editing {
+        background-color: #fff;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    }
+    .editable-cell.has-override {
+        background-color: #fef3c7;
+        border-color: #fcd34d;
+    }
+    .editable-cell.has-override:hover {
+        background-color: #fde68a;
+    }
+    .editable-cell input {
+        width: 100px;
+        padding: 2px 4px;
+        border: none;
+        background: transparent;
+        font-size: inherit;
+        text-align: right;
+        outline: none;
+    }
+    .edit-icon {
+        display: none;
+        position: absolute;
+        right: -4px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #9ca3af;
+    }
+    .editable-cell:hover .edit-icon {
+        display: inline;
+    }
+
+    /* Validation indicator */
+    .validation-ok { color: #16a34a; }
+    .validation-error { color: #dc2626; }
+    .validation-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+    .validation-badge.ok {
+        background: #dcfce7;
+        color: #166534;
+    }
+    .validation-badge.error {
+        background: #fee2e2;
+        color: #991b1b;
     }
 
     /* Drilldown popover styles */
@@ -141,10 +207,6 @@
         text-align: right;
     }
 
-    /* Integrity indicators */
-    .integrity-ok { color: #16a34a; }
-    .integrity-warn { color: #dc2626; }
-
     /* Table styling */
     #gmp-table th, #gmp-table td {
         padding: 10px 14px;
@@ -183,26 +245,27 @@
         font-weight: 500;
         color: #166534;
     }
-    .relationship-badge.warning {
-        background: #fef9c3;
-        border-color: #fde047;
-        color: #854d0e;
-    }
 
-    /* Collapsible section */
-    .collapse-toggle {
-        cursor: pointer;
-        user-select: none;
+    /* Edit modal */
+    .edit-modal {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 1100;
+        align-items: center;
+        justify-content: center;
     }
-    .collapse-toggle:hover {
-        color: #2563eb;
+    .edit-modal.show {
+        display: flex;
     }
-    .collapse-content {
-        overflow: hidden;
-        transition: max-height 0.3s ease;
-    }
-    .collapse-content.collapsed {
-        max-height: 0 !important;
+    .edit-modal-content {
+        background: white;
+        border-radius: 12px;
+        padding: 24px;
+        width: 420px;
+        max-width: 90vw;
+        box-shadow: 0 20px 50px rgba(0,0,0,0.3);
     }
 </style>
 {% endblock %}
@@ -290,12 +353,20 @@
                     </label>
                 </div>
 
-                <!-- Drilldown Hint -->
-                <div class="text-sm text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full">
-                    <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
-                    </svg>
-                    Click Assigned values for drill-down
+                <!-- Help Hints -->
+                <div class="flex items-center gap-3 text-sm">
+                    <span class="text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full">
+                        <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+                        </svg>
+                        Double-click to edit
+                    </span>
+                    <span class="text-gray-500 bg-gray-100 px-3 py-1.5 rounded-full">
+                        <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
+                        </svg>
+                        Click for drill-down
+                    </span>
                 </div>
             </div>
 
@@ -308,6 +379,7 @@
                             <th class="text-right">GMP Amount</th>
                             <th class="text-right">Assigned West</th>
                             <th class="text-right">Assigned East</th>
+                            <th class="text-center" style="width: 60px">Valid</th>
                             <th class="text-right">Forecast West</th>
                             <th class="text-right">Forecast East</th>
                             <th class="text-right">Surplus/Overrun</th>
@@ -319,23 +391,50 @@
                     </thead>
                     <tbody>
                         {% for row in rows %}
-                        <tr class="border-b border-gray-100" data-gmp="{{ row.gmp_division }}">
+                        <tr class="border-b border-gray-100" data-gmp="{{ row.gmp_division }}" data-actual-total="{{ row.actual_west_raw + row.actual_east_raw }}">
                             <td class="font-medium text-gray-900">{{ row.gmp_division }}</td>
                             <td class="text-right text-gray-700">{{ row.gmp_amount }}</td>
                             <td class="text-right">
-                                <span class="drilldown-trigger"
+                                <span class="editable-cell"
                                       data-gmp="{{ row.gmp_division }}"
-                                      data-region="west"
-                                      data-value="{{ row.actual_west_raw }}">
-                                    {{ row.amount_assigned_west }}
+                                      data-field="west"
+                                      data-value="{{ row.actual_west_raw }}"
+                                      data-display="{{ row.amount_assigned_west }}"
+                                      ondblclick="openEditModal(this)">
+                                    <span class="drilldown-trigger"
+                                          data-gmp="{{ row.gmp_division }}"
+                                          data-region="west"
+                                          onclick="event.stopPropagation(); showDrilldown(this)">
+                                        {{ row.amount_assigned_west }}
+                                    </span>
+                                    <svg class="edit-icon w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+                                    </svg>
                                 </span>
                             </td>
                             <td class="text-right">
-                                <span class="drilldown-trigger"
+                                <span class="editable-cell"
                                       data-gmp="{{ row.gmp_division }}"
-                                      data-region="east"
-                                      data-value="{{ row.actual_east_raw }}">
-                                    {{ row.amount_assigned_east }}
+                                      data-field="east"
+                                      data-value="{{ row.actual_east_raw }}"
+                                      data-display="{{ row.amount_assigned_east }}"
+                                      ondblclick="openEditModal(this)">
+                                    <span class="drilldown-trigger"
+                                          data-gmp="{{ row.gmp_division }}"
+                                          data-region="east"
+                                          onclick="event.stopPropagation(); showDrilldown(this)">
+                                        {{ row.amount_assigned_east }}
+                                    </span>
+                                    <svg class="edit-icon w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+                                    </svg>
+                                </span>
+                            </td>
+                            <td class="text-center validation-cell">
+                                <span class="validation-badge ok" title="West + East = Total">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                    </svg>
                                 </span>
                             </td>
                             <td class="text-right text-gray-600">{{ row.forecast_west }}</td>
@@ -354,8 +453,9 @@
                         <tr>
                             <td class="text-gray-900">TOTAL</td>
                             <td class="text-right">{{ summary.total_gmp }}</td>
-                            <td class="text-right">-</td>
-                            <td class="text-right">-</td>
+                            <td class="text-right" id="total-west">-</td>
+                            <td class="text-right" id="total-east">-</td>
+                            <td class="text-center">-</td>
                             <td class="text-right">-</td>
                             <td class="text-right">-</td>
                             <td class="text-right {% if summary.surplus_positive %}surplus{% else %}overrun{% endif %}">
@@ -410,20 +510,20 @@
                     <div class="space-y-3 text-sm">
                         <div class="p-2 bg-gray-50 rounded-md">
                             <div class="flex items-center justify-between mb-1">
-                                <span class="font-medium text-gray-700">GMP → Budget</span>
+                                <span class="font-medium text-gray-700">GMP -> Budget</span>
                                 <span class="text-xs text-gray-500">1:N</span>
                             </div>
                             <div class="text-xs text-gray-500">
-                                {{ rows|length }} GMP divisions → {{ mapping_stats.total_budget_rows }} budget codes
+                                {{ rows|length }} GMP divisions -> {{ mapping_stats.total_budget_rows }} budget codes
                             </div>
                         </div>
                         <div class="p-2 bg-gray-50 rounded-md">
                             <div class="flex items-center justify-between mb-1">
-                                <span class="font-medium text-gray-700">Budget → Direct Cost</span>
+                                <span class="font-medium text-gray-700">Budget -> Direct Cost</span>
                                 <span class="text-xs text-gray-500">1:N</span>
                             </div>
                             <div class="text-xs text-gray-500">
-                                {{ mapping_stats.total_budget_rows }} budget codes → {{ mapping_stats.total_direct_rows }} direct costs
+                                {{ mapping_stats.total_budget_rows }} budget codes -> {{ mapping_stats.total_direct_rows }} direct costs
                             </div>
                         </div>
                     </div>
@@ -434,20 +534,20 @@
                     <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Mapping Status</h3>
                     <div class="space-y-2 text-sm">
                         <div class="flex justify-between items-center">
-                            <span class="text-gray-600">Budget → GMP</span>
+                            <span class="text-gray-600">Budget -> GMP</span>
                             <span class="badge {% if mapping_stats.unmapped_budget_to_gmp > 0 %}badge-yellow{% else %}badge-green{% endif %}">
                                 {{ mapping_stats.mapped_budget_to_gmp }}/{{ mapping_stats.total_budget_rows }}
                             </span>
                         </div>
                         <div class="flex justify-between items-center">
-                            <span class="text-gray-600">Direct → Budget</span>
+                            <span class="text-gray-600">Direct -> Budget</span>
                             <span class="badge {% if mapping_stats.unmapped_direct_to_budget > 0 %}badge-yellow{% else %}badge-green{% endif %}">
                                 {{ mapping_stats.mapped_direct_to_budget }}/{{ mapping_stats.total_direct_rows }}
                             </span>
                         </div>
                         {% if mapping_stats.unmapped_budget_to_gmp > 0 or mapping_stats.unmapped_direct_to_budget > 0 %}
                         <a href="/mappings" class="block text-center text-blue-600 hover:underline text-xs mt-2">
-                            Review unmapped items →
+                            Review unmapped items
                         </a>
                         {% endif %}
                     </div>
@@ -469,11 +569,6 @@
                             <span class="badge badge-green">0</span>
                             {% endif %}
                         </div>
-                        {% if duplicates_summary.pending_review > 0 %}
-                        <a href="/duplicates" class="block text-center text-blue-600 hover:underline text-xs mt-2">
-                            Review duplicates →
-                        </a>
-                        {% endif %}
                     </div>
                 </div>
 
@@ -502,6 +597,53 @@
     </div>
 </div>
 
+<!-- Edit Modal -->
+<div id="edit-modal" class="edit-modal">
+    <div class="edit-modal-content">
+        <h3 class="text-lg font-semibold text-gray-900 mb-4">Edit Allocation</h3>
+        <p class="text-sm text-gray-600 mb-4" id="edit-modal-division"></p>
+
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Assigned West (cents)</label>
+                <input type="number" id="edit-west" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Assigned East (cents)</label>
+                <input type="number" id="edit-east" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+
+            <!-- Validation Status -->
+            <div id="edit-validation" class="p-3 rounded-md">
+                <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium">West + East</span>
+                    <span id="edit-sum" class="font-semibold">$0.00</span>
+                </div>
+                <div class="flex items-center justify-between mt-1">
+                    <span class="text-sm font-medium">Expected Total</span>
+                    <span id="edit-expected" class="font-semibold">$0.00</span>
+                </div>
+                <div id="edit-validation-msg" class="mt-2 text-sm"></div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+                <input type="text" id="edit-notes" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Reason for change">
+            </div>
+        </div>
+
+        <div class="flex justify-between mt-6">
+            <button onclick="clearOverride()" class="text-red-600 hover:text-red-800 text-sm">
+                Reset to Computed
+            </button>
+            <div class="space-x-2">
+                <button onclick="closeEditModal()" class="btn btn-secondary">Cancel</button>
+                <button onclick="saveAllocation()" class="btn btn-primary" id="save-btn">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Drilldown Popover -->
 <div id="drilldown-popover" class="drilldown-popover">
     <div class="drilldown-header">
@@ -520,6 +662,9 @@
 
 {% block extra_scripts %}
 <script>
+let currentEditGmp = null;
+let currentEditTotal = 0;
+
 $(document).ready(function() {
     // Initialize DataTable
     const table = $('#gmp-table').DataTable({
@@ -536,158 +681,208 @@ $(document).ready(function() {
         }
     });
 
-    // Style the search box
     $('.dataTables_filter input').addClass('form-input text-sm rounded-md border-gray-300');
 
-    // Column toggle functionality
+    // Column toggle
     $('.col-toggle').change(function() {
         const col = $(this).data('col');
-        const isChecked = $(this).is(':checked');
-        $(`.col-${col}`).toggleClass('hidden', !isChecked);
+        $(`.col-${col}`).toggleClass('hidden', !$(this).is(':checked'));
     });
 
-    // Drilldown popover functionality
-    const popover = $('#drilldown-popover');
-
-    // Click handler for drilldown triggers
-    $('.drilldown-trigger').click(function(e) {
-        e.stopPropagation();
-        const gmp = $(this).data('gmp');
-        const region = $(this).data('region');
-
-        // Position popover
-        const rect = this.getBoundingClientRect();
-        let left = rect.left;
-        let top = rect.bottom + 8;
-
-        // Adjust to stay on screen
-        const popWidth = 580;
-        const popHeight = 400;
-
-        if (left + popWidth > window.innerWidth - 20) {
-            left = window.innerWidth - popWidth - 20;
-        }
-        if (left < 20) left = 20;
-
-        if (top + popHeight > window.innerHeight - 20) {
-            top = rect.top - popHeight - 8;
-        }
-        if (top < 20) top = 20;
-
-        popover.css({ left: left + 'px', top: top + 'px' });
-
-        // Show loading state
-        $('#drilldown-title').text(`${gmp} - ${region.charAt(0).toUpperCase() + region.slice(1)}`);
-        $('#drilldown-content').html(`
-            <div class="flex items-center justify-center py-8">
-                <svg class="animate-spin h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <span class="ml-2 text-gray-500">Loading breakdown...</span>
-            </div>
-        `);
-        popover.addClass('show');
-
-        // Fetch data
-        fetch(`/api/gmp/drilldown/${encodeURIComponent(gmp)}`)
-            .then(response => response.json())
-            .then(data => renderDrilldown(data, region))
-            .catch(err => {
-                $('#drilldown-content').html(`
-                    <div class="text-center py-8 text-red-500">
-                        <svg class="w-8 h-8 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                        Error loading data
-                    </div>
-                `);
-            });
-    });
-
-    // Close popover handlers
-    $('#close-drilldown').click(() => popover.removeClass('show'));
+    // Close handlers
+    $('#close-drilldown').click(() => $('#drilldown-popover').removeClass('show'));
     $(document).click(function(e) {
         if (!$(e.target).closest('.drilldown-popover, .drilldown-trigger').length) {
-            popover.removeClass('show');
+            $('#drilldown-popover').removeClass('show');
         }
     });
     $(document).keyup(function(e) {
-        if (e.key === 'Escape') popover.removeClass('show');
+        if (e.key === 'Escape') {
+            $('#drilldown-popover').removeClass('show');
+            closeEditModal();
+        }
     });
 
-    // Render drilldown content
-    function renderDrilldown(data, region) {
-        const total = region === 'west' ? data.total_west_display : data.total_east_display;
-
-        let html = `
-            <div class="flex justify-between items-center mb-4 pb-3 border-b">
-                <div>
-                    <span class="text-sm text-gray-500">${data.record_count.toLocaleString()} records</span>
-                    <span class="text-gray-300 mx-2">|</span>
-                    <span class="text-sm text-gray-500">${data.budget_count} budget codes</span>
-                </div>
-                <div class="text-lg font-bold text-gray-900">${total}</div>
-            </div>
-        `;
-
-        if (data.budget_breakdown.length > 0) {
-            html += `
-                <table class="drilldown-table">
-                    <thead>
-                        <tr>
-                            <th>Budget Code</th>
-                            <th>Description</th>
-                            <th class="text-right">Records</th>
-                            <th class="text-right">${region.charAt(0).toUpperCase() + region.slice(1)} Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-            `;
-
-            data.budget_breakdown.forEach(budget => {
-                const amount = region === 'west' ? budget.total_west_display : budget.total_east_display;
-                html += `
-                    <tr>
-                        <td class="font-medium text-blue-600">${budget.budget_code}</td>
-                        <td class="text-gray-600" style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${budget.description || '-'}</td>
-                        <td class="text-right text-gray-500">${budget.count}</td>
-                        <td class="text-right font-medium">${amount}</td>
-                    </tr>
-                `;
-            });
-
-            html += '</tbody></table>';
-
-            if (data.budget_breakdown.length >= 10) {
-                html += `<div class="mt-3 text-xs text-gray-400 text-center">Showing top 10 budget codes</div>`;
-            }
-        } else {
-            html += `
-                <div class="text-center py-6 text-gray-400">
-                    <svg class="w-10 h-10 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
-                    </svg>
-                    No records assigned
-                </div>
-            `;
-        }
-
-        // Integrity check footer
-        html += `
-            <div class="mt-4 pt-3 border-t flex items-center justify-between">
-                <div class="flex items-center ${data.integrity_check ? 'text-green-600' : 'text-red-600'}">
-                    ${data.integrity_check
-                        ? '<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
-                        : '<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'}
-                    <span class="font-medium">${data.integrity_check ? 'Integrity Verified' : 'Variance Detected'}</span>
-                </div>
-                <span class="text-xs text-gray-400">West + East = Total</span>
-            </div>
-        `;
-
-        $('#drilldown-content').html(html);
-    }
+    // Real-time validation in edit modal
+    $('#edit-west, #edit-east').on('input', updateValidation);
 });
+
+function formatCurrency(cents) {
+    return '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function openEditModal(cell) {
+    const gmp = $(cell).data('gmp');
+    const field = $(cell).data('field');
+    const row = $(cell).closest('tr');
+
+    currentEditGmp = gmp;
+
+    // Get current values
+    const westCell = row.find('[data-field="west"]');
+    const eastCell = row.find('[data-field="east"]');
+    const westValue = parseInt(westCell.data('value')) || 0;
+    const eastValue = parseInt(eastCell.data('value')) || 0;
+    currentEditTotal = westValue + eastValue;
+
+    $('#edit-modal-division').text(`Division: ${gmp}`);
+    $('#edit-west').val(westValue);
+    $('#edit-east').val(eastValue);
+    $('#edit-notes').val('');
+
+    updateValidation();
+    $('#edit-modal').addClass('show');
+
+    // Focus the field that was clicked
+    if (field === 'west') {
+        $('#edit-west').focus().select();
+    } else {
+        $('#edit-east').focus().select();
+    }
+}
+
+function closeEditModal() {
+    $('#edit-modal').removeClass('show');
+    currentEditGmp = null;
+}
+
+function updateValidation() {
+    const west = parseInt($('#edit-west').val()) || 0;
+    const east = parseInt($('#edit-east').val()) || 0;
+    const sum = west + east;
+
+    $('#edit-sum').text(formatCurrency(sum));
+    $('#edit-expected').text(formatCurrency(currentEditTotal));
+
+    const validationDiv = $('#edit-validation');
+    const msgDiv = $('#edit-validation-msg');
+    const saveBtn = $('#save-btn');
+
+    if (sum === currentEditTotal) {
+        validationDiv.removeClass('bg-red-50').addClass('bg-green-50');
+        msgDiv.html('<span class="text-green-600"><svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>Valid: West + East = Total</span>');
+        saveBtn.prop('disabled', false).removeClass('opacity-50');
+    } else {
+        const diff = sum - currentEditTotal;
+        validationDiv.removeClass('bg-green-50').addClass('bg-red-50');
+        msgDiv.html(`<span class="text-red-600"><svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>Variance: ${formatCurrency(diff)}</span>`);
+        saveBtn.prop('disabled', true).addClass('opacity-50');
+    }
+}
+
+function saveAllocation() {
+    const west = parseInt($('#edit-west').val()) || 0;
+    const east = parseInt($('#edit-east').val()) || 0;
+    const notes = $('#edit-notes').val();
+
+    fetch(`/api/gmp/allocations/${encodeURIComponent(currentEditGmp)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            amount_west_cents: west,
+            amount_east_cents: east,
+            notes: notes
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update the UI
+            const row = $(`tr[data-gmp="${currentEditGmp}"]`);
+            const westCell = row.find('[data-field="west"]');
+            const eastCell = row.find('[data-field="east"]');
+
+            westCell.data('value', west);
+            eastCell.data('value', east);
+            westCell.find('.drilldown-trigger').text(formatCurrency(west));
+            eastCell.find('.drilldown-trigger').text(formatCurrency(east));
+
+            // Mark as override
+            westCell.addClass('has-override');
+            eastCell.addClass('has-override');
+
+            closeEditModal();
+        } else {
+            alert('Error saving allocation');
+        }
+    })
+    .catch(err => {
+        console.error('Error:', err);
+        alert('Error saving allocation');
+    });
+}
+
+function clearOverride() {
+    if (!confirm('Reset to computed values? This will remove your manual override.')) return;
+
+    fetch(`/api/gmp/allocations/${encodeURIComponent(currentEditGmp)}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        }
+    });
+}
+
+function showDrilldown(trigger) {
+    const gmp = $(trigger).data('gmp');
+    const region = $(trigger).data('region');
+    const popover = $('#drilldown-popover');
+
+    // Position
+    const rect = trigger.getBoundingClientRect();
+    let left = rect.left;
+    let top = rect.bottom + 8;
+
+    if (left + 580 > window.innerWidth - 20) left = window.innerWidth - 600;
+    if (left < 20) left = 20;
+    if (top + 400 > window.innerHeight - 20) top = rect.top - 408;
+    if (top < 20) top = 20;
+
+    popover.css({ left: left + 'px', top: top + 'px' });
+
+    $('#drilldown-title').text(`${gmp} - ${region.charAt(0).toUpperCase() + region.slice(1)}`);
+    $('#drilldown-content').html('<div class="flex items-center justify-center py-8"><svg class="animate-spin h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span class="ml-2 text-gray-500">Loading...</span></div>');
+    popover.addClass('show');
+
+    fetch(`/api/gmp/drilldown/${encodeURIComponent(gmp)}`)
+        .then(response => response.json())
+        .then(data => renderDrilldown(data, region))
+        .catch(err => {
+            $('#drilldown-content').html('<div class="text-center py-8 text-red-500">Error loading data</div>');
+        });
+}
+
+function renderDrilldown(data, region) {
+    const total = region === 'west' ? data.total_west_display : data.total_east_display;
+    let html = `
+        <div class="flex justify-between items-center mb-4 pb-3 border-b">
+            <div>
+                <span class="text-sm text-gray-500">${data.record_count.toLocaleString()} records</span>
+                <span class="text-gray-300 mx-2">|</span>
+                <span class="text-sm text-gray-500">${data.budget_count} budget codes</span>
+            </div>
+            <div class="text-lg font-bold text-gray-900">${total}</div>
+        </div>
+    `;
+
+    if (data.budget_breakdown.length > 0) {
+        html += '<table class="drilldown-table"><thead><tr><th>Budget Code</th><th>Description</th><th class="text-right">Records</th><th class="text-right">' + region.charAt(0).toUpperCase() + region.slice(1) + ' Amount</th></tr></thead><tbody>';
+        data.budget_breakdown.forEach(budget => {
+            const amount = region === 'west' ? budget.total_west_display : budget.total_east_display;
+            html += `<tr><td class="font-medium text-blue-600">${budget.budget_code}</td><td class="text-gray-600" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${budget.description || '-'}</td><td class="text-right text-gray-500">${budget.count}</td><td class="text-right font-medium">${amount}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        if (data.budget_breakdown.length >= 10) html += '<div class="mt-3 text-xs text-gray-400 text-center">Showing top 10</div>';
+    } else {
+        html += '<div class="text-center py-6 text-gray-400">No records assigned</div>';
+    }
+
+    html += `<div class="mt-4 pt-3 border-t flex items-center justify-between"><div class="flex items-center ${data.integrity_check ? 'text-green-600' : 'text-red-600'}">${data.integrity_check ? '<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>' : '<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'}<span class="font-medium">${data.integrity_check ? 'Integrity Verified' : 'Variance Detected'}</span></div><span class="text-xs text-gray-400">West + East = Total</span></div>`;
+
+    $('#drilldown-content').html(html);
+}
 </script>
 {% endblock %}

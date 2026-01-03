@@ -185,6 +185,41 @@ class SuggestionCache(Base):
     stale = Column(Boolean, default=False, index=True)  # True when cache needs refresh
 
 
+class GMPAllocationOverride(Base):
+    """
+    Manual overrides for GMP division allocation amounts.
+    Allows users to directly edit Assigned East/West values.
+    Stores amounts in cents for precision.
+    """
+    __tablename__ = "gmp_allocation_overrides"
+
+    id = Column(Integer, primary_key=True, index=True)
+    gmp_division = Column(String(200), unique=True, index=True)
+    amount_west_cents = Column(Integer, nullable=True)  # Manual override for West, null = use computed
+    amount_east_cents = Column(Integer, nullable=True)  # Manual override for East, null = use computed
+    notes = Column(Text, nullable=True)
+    created_by = Column(String(100), default="user")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AllocationChangeLog(Base):
+    """
+    Audit log for allocation changes.
+    Tracks all modifications to assigned amounts for traceability.
+    """
+    __tablename__ = "allocation_change_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    gmp_division = Column(String(200), index=True)
+    field_changed = Column(String(50))  # amount_west, amount_east
+    old_value_cents = Column(Integer, nullable=True)
+    new_value_cents = Column(Integer, nullable=True)
+    change_reason = Column(String(200), nullable=True)
+    changed_by = Column(String(100), default="user")
+    changed_at = Column(DateTime, default=datetime.utcnow)
+
+
 def init_db():
     """Initialize the database and create all tables."""
     Base.metadata.create_all(bind=engine)
