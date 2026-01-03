@@ -30,3 +30,7 @@ python-multipart>=0.0.6
 
 # Validation
 pydantic>=2.0.0
+
+# Testing
+httpx>=0.25.0
+pytest>=7.0.0
