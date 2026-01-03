@@ -43,8 +43,9 @@ from app.modules.suggestion_engine import (
     compute_all_suggestions, compute_single_suggestion,
     record_mapping_feedback, get_cached_suggestions,
     df_to_direct_cost_rows, df_to_budget_rows,
-    normalize_vendor, THRESHOLD_HIGH, THRESHOLD_MEDIUM
+    normalize_vendor, _get_thresholds
 )
+from app.config import get_config
 
 
 # Initialize FastAPI app
@@ -502,7 +503,8 @@ async def bulk_accept_suggestions(
     Returns count of mappings created.
     """
     data = await request.json()
-    min_confidence = data.get('min_confidence', THRESHOLD_HIGH * 100)  # Default to high threshold
+    thresholds = _get_thresholds()
+    min_confidence = data.get('min_confidence', thresholds['high'] * 100)  # Default to high threshold
     direct_cost_ids = data.get('direct_cost_ids', [])  # Optional: specific IDs to process
 
     data_loader = get_data_loader()

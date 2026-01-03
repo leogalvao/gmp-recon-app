@@ -1,16 +1,18 @@
 """
 Suggestion Engine for Direct Cost → Budget Mapping.
 
-Implements the match scoring algorithm with:
-- Code prefix matching (40% weight)
-- Cost type matching (20% weight)
-- Fuzzy text similarity (30% weight)
-- Historical pattern boost (10% weight)
+Implements the match scoring algorithm with configurable weights from YAML:
+- Code prefix matching (default 40% weight)
+- Cost type matching (default 20% weight)
+- Fuzzy text similarity (default 30% weight)
+- Historical pattern boost (default 10% weight)
 
-Confidence bands:
+Confidence bands (configurable):
 - High: ≥ 0.85 (auto-suggest, green highlight)
 - Medium: 0.60 – 0.84 (show suggestion, yellow highlight)
 - Low: < 0.60 (no suggestion, manual required)
+
+Configuration is loaded from gmp_mapping_config.yaml via app.config.
 """
 import re
 import json
@@ -25,37 +27,32 @@ from sqlalchemy.orm import Session
 from ..models import (
     MappingFeedback, BudgetMatchStats, SuggestionCache, DirectToBudget
 )
+from ..config import get_config
 
 
 # =============================================================================
-# Configuration
+# Configuration Accessors
 # =============================================================================
 
-# Scoring weights (must sum to 1.0)
-WEIGHT_CODE_MATCH = 0.40
-WEIGHT_TYPE_MATCH = 0.20
-WEIGHT_TEXT_SIM = 0.30
-WEIGHT_HISTORICAL = 0.10
+def _get_weights() -> Dict[str, float]:
+    """Get scoring weights from config."""
+    return get_config().suggestion_weights
 
-# Confidence thresholds
-THRESHOLD_HIGH = 0.85
-THRESHOLD_MEDIUM = 0.60
-THRESHOLD_MINIMUM = 0.40  # Below this, don't even consider as candidate
 
-# Cost type compatibility matrix
-# Full match = 1.0, Partial match = 0.5, No match = 0.0
-TYPE_COMPATIBILITY = {
-    ('L', 'L'): 1.0,  # Labor
-    ('M', 'M'): 1.0,  # Material
-    ('S', 'S'): 1.0,  # Subcontract
-    ('O', 'O'): 1.0,  # Other
-    ('L', 'S'): 0.5,  # Labor ↔ Subcontract (often interchangeable)
-    ('S', 'L'): 0.5,
-    ('LB', 'L'): 1.0,  # Alternate codes
-    ('L', 'LB'): 1.0,
-    ('SC', 'S'): 1.0,
-    ('S', 'SC'): 1.0,
-}
+def _get_thresholds() -> Dict[str, float]:
+    """Get confidence thresholds from config."""
+    config = get_config()
+    bands = config.confidence_bands
+    return {
+        'high': bands.get('high', {}).get('min_score', 0.85),
+        'medium': bands.get('medium', {}).get('min_score', 0.60),
+        'low': bands.get('low', {}).get('min_score', 0.40),
+    }
+
+
+def _get_type_score(source_type: str, target_type: str) -> float:
+    """Get cost type compatibility score from config."""
+    return get_config().get_cost_type_score(source_type, target_type)
 
 
 # =============================================================================
@@ -241,8 +238,8 @@ def compute_code_match(dc_base_code: str, budget_base_code: str) -> float:
 
 def compute_type_match(dc_type: str, budget_type: str) -> float:
     """
-    Compute cost type match score using compatibility matrix.
-    Returns 1.0 for exact match, 0.5 for compatible types, 0.0 otherwise.
+    Compute cost type match score using compatibility matrix from config.
+    Returns 1.0 for exact match, partial score for compatible types, default otherwise.
     """
     dc_code = extract_cost_type_code(dc_type)
     budget_code = extract_cost_type_code(budget_type)
@@ -250,13 +247,8 @@ def compute_type_match(dc_type: str, budget_type: str) -> float:
     if not dc_code or not budget_code:
         return 0.0
 
-    # Check compatibility matrix
-    key = (dc_code, budget_code)
-    if key in TYPE_COMPATIBILITY:
-        return TYPE_COMPATIBILITY[key]
-
-    # Fallback: exact match only
-    return 1.0 if dc_code == budget_code else 0.0
+    # Use config-based cost type scoring
+    return _get_type_score(dc_code, budget_code)
 
 
 def compute_text_similarity(dc_name: str, budget_description: str) -> float:
@@ -304,9 +296,9 @@ def compute_match_score(
     """
     Compute composite match score for a direct cost → budget pair.
 
-    Score formula:
-        score = (0.40 × code_match) + (0.20 × type_match) +
-                (0.30 × text_sim) + (0.10 × historical_boost)
+    Score formula (weights from config):
+        score = (code_prefix_match × code_match) + (cost_type_match × type_match) +
+                (text_similarity × text_sim) + (historical_pattern × historical_boost)
     """
     # Component scores
     code_match = compute_code_match(dc.base_code, budget.base_code)
@@ -319,18 +311,22 @@ def compute_match_score(
         history
     )
 
-    # Weighted sum
+    # Get weights from config
+    weights = _get_weights()
+
+    # Weighted sum using config weights
     total_score = (
-        WEIGHT_CODE_MATCH * code_match +
-        WEIGHT_TYPE_MATCH * type_match +
-        WEIGHT_TEXT_SIM * text_sim +
-        WEIGHT_HISTORICAL * historical
+        weights.get('code_prefix_match', 0.40) * code_match +
+        weights.get('cost_type_match', 0.20) * type_match +
+        weights.get('text_similarity', 0.30) * text_sim +
+        weights.get('historical_pattern', 0.10) * historical
     )
 
-    # Determine confidence band
-    if total_score >= THRESHOLD_HIGH:
+    # Determine confidence band using config thresholds
+    thresholds = _get_thresholds()
+    if total_score >= thresholds['high']:
         confidence_band = 'high'
-    elif total_score >= THRESHOLD_MEDIUM:
+    elif total_score >= thresholds['medium']:
         confidence_band = 'medium'
     else:
         confidence_band = 'low'
@@ -411,12 +407,14 @@ def rank_suggestions(
     2. Alphabetical by budget code (deterministic fallback)
     """
     candidates = []
+    thresholds = _get_thresholds()
+    min_threshold = thresholds.get('low', 0.40)
 
     for budget in budget_rows:
         scored = compute_match_score(dc, budget, history)
 
-        # Only consider candidates above minimum threshold
-        if scored.total_score >= THRESHOLD_MINIMUM:
+        # Only consider candidates above minimum threshold from config
+        if scored.total_score >= min_threshold:
             scored.historical_match_count = match_counts.get(budget.budget_code, 0)
             candidates.append(scored)
 

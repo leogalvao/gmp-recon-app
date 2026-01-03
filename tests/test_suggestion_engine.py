@@ -23,14 +23,11 @@ from app.modules.suggestion_engine import (
     DirectCostRow,
     BudgetRow,
     ScoredMatch,
-    # Constants
-    WEIGHT_CODE_MATCH,
-    WEIGHT_TYPE_MATCH,
-    WEIGHT_TEXT_SIM,
-    WEIGHT_HISTORICAL,
-    THRESHOLD_HIGH,
-    THRESHOLD_MEDIUM,
+    # Config accessors
+    _get_weights,
+    _get_thresholds,
 )
+from app.config import get_config
 
 
 class TestNormalizationFunctions:
@@ -100,8 +97,10 @@ class TestScoringFunctions:
         assert compute_type_match('S', 'L') == 0.5
 
     def test_compute_type_match_different(self):
-        assert compute_type_match('L', 'M') == 0.0
-        assert compute_type_match('M', 'S') == 0.0
+        # Non-compatible types return default score from config (0.2)
+        assert compute_type_match('L', 'M') == 0.2  # Default score
+        # M->S has a partial match in config (0.4)
+        assert compute_type_match('M', 'S') == 0.4
 
     def test_compute_text_similarity_exact(self):
         score = compute_text_similarity('Concrete Materials', 'Concrete Materials')
@@ -184,10 +183,10 @@ class TestCompositeScoring:
         score = compute_match_score(dc, budget, history)
 
         assert score.code_match_score == 1.0
-        assert score.type_match_score == 0.0  # O vs M
+        assert score.type_match_score == 0.2  # O vs M returns default score from config
         assert score.historical_score == 0.0
-        # Total should be around 0.40 (code) + text_sim contribution
-        assert 0.40 <= score.total_score <= 0.60
+        # Total should be around 0.40 (code) + 0.04 (type default) + text_sim contribution
+        assert 0.40 <= score.total_score <= 0.65
 
     def test_ranking_with_tie_breaking(self, sample_budget_rows):
         """Test that ranking uses tie-breaking correctly."""
@@ -251,14 +250,32 @@ class TestCompositeScoring:
 
 
 class TestWeightConfiguration:
-    """Test that weights are configured correctly."""
+    """Test that weights are configured correctly from config."""
 
     def test_weights_sum_to_one(self):
-        total = WEIGHT_CODE_MATCH + WEIGHT_TYPE_MATCH + WEIGHT_TEXT_SIM + WEIGHT_HISTORICAL
+        """Test that suggestion weights from config sum to 1.0."""
+        weights = _get_weights()
+        total = sum(weights.values())
         assert abs(total - 1.0) < 0.001
 
     def test_threshold_ordering(self):
-        assert THRESHOLD_HIGH > THRESHOLD_MEDIUM
+        """Test that thresholds are in correct order (high > medium > low)."""
+        thresholds = _get_thresholds()
+        assert thresholds['high'] > thresholds['medium']
+        assert thresholds['medium'] > thresholds['low']
+
+    def test_config_weights_match_function(self):
+        """Test that config weights match the function accessor."""
+        config = get_config()
+        weights = _get_weights()
+        assert weights == config.suggestion_weights
+
+    def test_config_thresholds_structure(self):
+        """Test that thresholds have expected keys."""
+        thresholds = _get_thresholds()
+        assert 'high' in thresholds
+        assert 'medium' in thresholds
+        assert 'low' in thresholds
 
 
 if __name__ == '__main__':
