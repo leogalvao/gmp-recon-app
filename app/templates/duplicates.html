@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+
+{% block title %}Duplicates Review - GMP Reconciliation{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Page Header -->
+    <div class="flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Duplicate Detection</h1>
+            <p class="text-gray-600 mt-1">Review and resolve suspected duplicate direct cost entries</p>
+        </div>
+        <div class="flex space-x-3">
+            <form action="/recompute" method="POST">
+                <button type="submit" class="btn btn-secondary">
+                    <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                    Re-detect Duplicates
+                </button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-6 gap-4">
+        <div class="card text-center">
+            <div class="text-3xl font-bold text-gray-900">{{ summary.total_duplicates }}</div>
+            <div class="text-sm text-gray-500">Total Flagged</div>
+        </div>
+        <div class="card text-center">
+            <div class="text-3xl font-bold text-blue-600">{{ summary.groups }}</div>
+            <div class="text-sm text-gray-500">Groups</div>
+        </div>
+        <div class="card text-center">
+            <div class="text-3xl font-bold text-green-600">{{ summary.exact_matches }}</div>
+            <div class="text-sm text-gray-500">Exact Matches</div>
+        </div>
+        <div class="card text-center">
+            <div class="text-3xl font-bold text-yellow-600">{{ summary.fuzzy_matches }}</div>
+            <div class="text-sm text-gray-500">Fuzzy Matches</div>
+        </div>
+        <div class="card text-center">
+            <div class="text-3xl font-bold text-red-600">{{ summary.reversals }}</div>
+            <div class="text-sm text-gray-500">Reversals</div>
+        </div>
+        <div class="card text-center">
+            <div class="text-3xl font-bold text-orange-600">{{ summary.pending_review }}</div>
+            <div class="text-sm text-gray-500">Pending Review</div>
+        </div>
+    </div>
+    
+    <!-- Legend -->
+    <div class="card">
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">Detection Methods</h3>
+        <div class="flex flex-wrap gap-4 text-sm">
+            <div class="flex items-center space-x-2">
+                <span class="inline-block w-3 h-3 rounded-full bg-green-500"></span>
+                <span><strong>Exact:</strong> Identical vendor, invoice, amount & date</span>
+            </div>
+            <div class="flex items-center space-x-2">
+                <span class="inline-block w-3 h-3 rounded-full bg-yellow-500"></span>
+                <span><strong>Fuzzy:</strong> Similar fields (90%+ match, ±1% amount, ±7 days)</span>
+            </div>
+            <div class="flex items-center space-x-2">
+                <span class="inline-block w-3 h-3 rounded-full bg-red-500"></span>
+                <span><strong>Reversal:</strong> Same details, opposite sign (credit/charge pair)</span>
+            </div>
+        </div>
+        <div class="mt-3 text-sm text-gray-600">
+            <svg class="w-4 h-4 inline text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            Entries with confidence ≥98% are auto-excluded from actuals. Lower confidence entries require manual review.
+        </div>
+    </div>
+    
+    {% if duplicates %}
+    <!-- Duplicates Table -->
+    <div class="card">
+        <div class="table-container">
+            <table id="duplicates-table" class="w-full">
+                <thead>
+                    <tr>
+                        <th class="px-4 py-3 text-left">Group</th>
+                        <th class="px-4 py-3 text-left">Method</th>
+                        <th class="px-4 py-3 text-left">Confidence</th>
+                        <th class="px-4 py-3 text-left">Vendor</th>
+                        <th class="px-4 py-3 text-left">Invoice #</th>
+                        <th class="px-4 py-3 text-right">Amount</th>
+                        <th class="px-4 py-3 text-left">Date</th>
+                        <th class="px-4 py-3 text-left">Cost Code</th>
+                        <th class="px-4 py-3 text-left">Status</th>
+                        <th class="px-4 py-3 text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set current_group = namespace(id=-1) %}
+                    {% for dup in duplicates %}
+                    {% if dup.group_id != current_group.id %}
+                        {% set current_group.id = dup.group_id %}
+                        <tr class="bg-gray-100">
+                            <td colspan="10" class="px-4 py-2">
+                                <span class="font-semibold text-gray-700">Group {{ dup.group_id }}</span>
+                                <span class="text-sm text-gray-500 ml-2">
+                                    ({{ duplicates|selectattr('group_id', 'equalto', dup.group_id)|list|length }} items)
+                                </span>
+                            </td>
+                        </tr>
+                    {% endif %}
+                    <tr class="border-b hover:bg-blue-50 {% if dup.auto_collapse %}bg-red-50{% endif %}">
+                        <td class="px-4 py-3">
+                            <span class="badge badge-blue">{{ dup.group_id }}</span>
+                        </td>
+                        <td class="px-4 py-3">
+                            {% if dup.method == 'exact' %}
+                            <span class="inline-flex items-center space-x-1">
+                                <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                                <span class="text-green-700">Exact</span>
+                            </span>
+                            {% elif dup.method == 'fuzzy' %}
+                            <span class="inline-flex items-center space-x-1">
+                                <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
+                                <span class="text-yellow-700">Fuzzy</span>
+                            </span>
+                            {% elif dup.method == 'reversal' %}
+                            <span class="inline-flex items-center space-x-1">
+                                <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                                <span class="text-red-700">Reversal</span>
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3">
+                            <div class="flex items-center space-x-2">
+                                <div class="w-16 bg-gray-200 rounded-full h-2">
+                                    <div class="h-2 rounded-full {% if dup.score_raw >= 0.98 %}bg-green-500{% elif dup.score_raw >= 0.90 %}bg-yellow-500{% else %}bg-orange-500{% endif %}" 
+                                         style="width: {{ (dup.score_raw * 100)|round }}%"></div>
+                                </div>
+                                <span class="text-sm font-medium">{{ dup.score }}</span>
+                            </div>
+                        </td>
+                        <td class="px-4 py-3 max-w-xs truncate" title="{{ dup.vendor }}">{{ dup.vendor }}</td>
+                        <td class="px-4 py-3">{{ dup.invoice or '—' }}</td>
+                        <td class="px-4 py-3 text-right font-mono {% if dup.amount_raw < 0 %}text-red-600{% endif %}">
+                            {{ dup.amount }}
+                        </td>
+                        <td class="px-4 py-3">{{ dup.date }}</td>
+                        <td class="px-4 py-3">
+                            <span class="text-xs font-mono bg-gray-100 px-2 py-1 rounded">{{ dup.cost_code }}</span>
+                        </td>
+                        <td class="px-4 py-3">
+                            {% if dup.auto_collapse %}
+                            <span class="badge badge-red">Auto-excluded</span>
+                            {% else %}
+                            <span class="badge badge-yellow">Needs Review</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-center">
+                            <div class="flex justify-center space-x-2">
+                                {% if not dup.auto_collapse %}
+                                <form action="/duplicates/resolve" method="POST" class="inline">
+                                    <input type="hidden" name="row_id" value="{{ dup.row_id }}">
+                                    <input type="hidden" name="action" value="exclude">
+                                    <button type="submit" class="text-red-600 hover:text-red-800" title="Exclude from actuals">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
+                                        </svg>
+                                    </button>
+                                </form>
+                                {% else %}
+                                <form action="/duplicates/resolve" method="POST" class="inline">
+                                    <input type="hidden" name="row_id" value="{{ dup.row_id }}">
+                                    <input type="hidden" name="action" value="include">
+                                    <button type="submit" class="text-green-600 hover:text-green-800" title="Include in actuals">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                    </button>
+                                </form>
+                                {% endif %}
+                                <button type="button" class="text-blue-600 hover:text-blue-800" title="View details" 
+                                        onclick="showDetails({{ dup|tojson }})">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <!-- No Duplicates -->
+    <div class="card text-center py-12">
+        <svg class="w-16 h-16 mx-auto text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <h3 class="mt-4 text-lg font-semibold text-gray-900">No Duplicates Detected</h3>
+        <p class="mt-2 text-gray-600">All direct cost entries appear to be unique.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Detail Modal -->
+<div id="detail-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-auto">
+        <div class="px-6 py-4 border-b flex justify-between items-center">
+            <h3 class="text-lg font-semibold">Entry Details</h3>
+            <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+        <div id="modal-content" class="p-6">
+            <!-- Populated by JS -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+$(document).ready(function() {
+    $('#duplicates-table').DataTable({
+        pageLength: 50,
+        order: [[0, 'asc']],
+        columnDefs: [
+            { orderable: false, targets: [9] }
+        ],
+        language: {
+            search: "Filter:",
+            lengthMenu: "Show _MENU_ entries"
+        }
+    });
+});
+
+function showDetails(dup) {
+    const content = `
+        <div class="space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <div class="text-sm text-gray-500">Row ID</div>
+                    <div class="font-medium">${dup.row_id}</div>
+                </div>
+                <div>
+                    <div class="text-sm text-gray-500">Group ID</div>
+                    <div class="font-medium">${dup.group_id}</div>
+                </div>
+                <div>
+                    <div class="text-sm text-gray-500">Detection Method</div>
+                    <div class="font-medium capitalize">${dup.method}</div>
+                </div>
+                <div>
+                    <div class="text-sm text-gray-500">Confidence Score</div>
+                    <div class="font-medium">${dup.score}</div>
+                </div>
+            </div>
+            <hr>
+            <div class="space-y-3">
+                <div>
+                    <div class="text-sm text-gray-500">Cost Code</div>
+                    <div class="font-mono bg-gray-100 px-2 py-1 rounded inline-block">${dup.cost_code || '—'}</div>
+                </div>
+                <div>
+                    <div class="text-sm text-gray-500">Vendor</div>
+                    <div class="font-medium">${dup.vendor || '—'}</div>
+                </div>
+                <div>
+                    <div class="text-sm text-gray-500">Invoice #</div>
+                    <div class="font-medium">${dup.invoice || '—'}</div>
+                </div>
+                <div>
+                    <div class="text-sm text-gray-500">Amount</div>
+                    <div class="font-medium font-mono">${dup.amount}</div>
+                </div>
+                <div>
+                    <div class="text-sm text-gray-500">Date</div>
+                    <div class="font-medium">${dup.date || '—'}</div>
+                </div>
+                <div>
+                    <div class="text-sm text-gray-500">Name</div>
+                    <div class="font-medium">${dup.name || '—'}</div>
+                </div>
+                <div>
+                    <div class="text-sm text-gray-500">Description</div>
+                    <div class="text-gray-700">${dup.description || '—'}</div>
+                </div>
+            </div>
+            ${dup.matched_with && dup.matched_with.length > 0 ? `
+            <hr>
+            <div>
+                <div class="text-sm text-gray-500 mb-2">Matched With Row IDs</div>
+                <div class="flex flex-wrap gap-2">
+                    ${dup.matched_with.map(id => `<span class="badge badge-blue">${id}</span>`).join('')}
+                </div>
+            </div>
+            ` : ''}
+        </div>
+    `;
+    document.getElementById('modal-content').innerHTML = content;
+    document.getElementById('detail-modal').classList.remove('hidden');
+}
+
+function closeModal() {
+    document.getElementById('detail-modal').classList.add('hidden');
+}
+
+// Close modal on escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeModal();
+});
+
+// Close modal on backdrop click
+document.getElementById('detail-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+</script>
+{% endblock %}

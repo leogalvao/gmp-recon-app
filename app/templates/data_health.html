@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block title %}Data Health - GMP Reconciliation{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Page Header -->
+    <div class="flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Data Health</h1>
+            <p class="text-gray-600 mt-1">Data quality summary and validation results</p>
+        </div>
+        <form action="/recompute" method="POST">
+            <button type="submit" class="btn btn-primary">
+                <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                Refresh Data
+            </button>
+        </form>
+    </div>
+    
+    <!-- Data Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- GMP Data -->
+        <div class="card">
+            <div class="flex items-center space-x-3 mb-4">
+                <div class="p-2 bg-blue-100 rounded-lg">
+                    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                    </svg>
+                </div>
+                <h3 class="text-lg font-semibold">GMP Data</h3>
+            </div>
+            <dl class="space-y-2">
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Divisions</dt>
+                    <dd class="font-medium">{{ stats.gmp_rows }}</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Total Amount</dt>
+                    <dd class="font-medium font-mono">{{ stats.total_gmp }}</dd>
+                </div>
+            </dl>
+        </div>
+        
+        <!-- Budget Data -->
+        <div class="card">
+            <div class="flex items-center space-x-3 mb-4">
+                <div class="p-2 bg-green-100 rounded-lg">
+                    <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                    </svg>
+                </div>
+                <h3 class="text-lg font-semibold">Budget Data</h3>
+            </div>
+            <dl class="space-y-2">
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Budget Lines</dt>
+                    <dd class="font-medium">{{ stats.budget_rows }}</dd>
+                </div>
+            </dl>
+        </div>
+        
+        <!-- Direct Costs Data -->
+        <div class="card">
+            <div class="flex items-center space-x-3 mb-4">
+                <div class="p-2 bg-purple-100 rounded-lg">
+                    <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                    </svg>
+                </div>
+                <h3 class="text-lg font-semibold">Direct Costs</h3>
+            </div>
+            <dl class="space-y-2">
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Transactions</dt>
+                    <dd class="font-medium">{{ stats.direct_cost_rows }}</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Total Amount</dt>
+                    <dd class="font-medium font-mono">{{ stats.total_direct_costs }}</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-500">Date Range</dt>
+                    <dd class="font-medium text-sm">{{ stats.date_range }}</dd>
+                </div>
+            </dl>
+        </div>
+    </div>
+    
+    <!-- Data Issues -->
+    <div class="card">
+        <h2 class="text-lg font-semibold mb-4">Data Quality Issues</h2>
+        
+        {% if issues %}
+        <div class="space-y-3">
+            {% for issue in issues %}
+            <div class="alert alert-{{ issue.type }}">
+                <div class="flex items-start space-x-3">
+                    {% if issue.type == 'error' %}
+                    <svg class="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    {% elif issue.type == 'warning' %}
+                    <svg class="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                    {% else %}
+                    <svg class="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    {% endif %}
+                    <div>
+                        <div class="font-medium">{{ issue.area }}</div>
+                        <div class="text-sm">{{ issue.message }}</div>
+                    </div>
+                    <div class="ml-auto">
+                        <span class="badge {% if issue.type == 'error' %}badge-red{% elif issue.type == 'warning' %}badge-yellow{% else %}badge-blue{% endif %}">
+                            {{ issue.count }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-8">
+            <svg class="w-16 h-16 mx-auto text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <h3 class="mt-4 text-lg font-semibold text-gray-900">All Data Looks Good!</h3>
+            <p class="mt-2 text-gray-600">No quality issues detected in the input files.</p>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- Validation Checklist -->
+    <div class="card">
+        <h2 class="text-lg font-semibold mb-4">Data Validation Checklist</h2>
+        
+        <div class="space-y-4">
+            <!-- GMP File -->
+            <div class="border-b pb-4">
+                <h3 class="font-medium text-gray-900 mb-2">GMP File (GMP-Amount.xlsx)</h3>
+                <ul class="space-y-2 text-sm">
+                    <li class="flex items-center space-x-2">
+                        {% if stats.gmp_rows > 0 %}
+                        <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        {% else %}
+                        <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                        {% endif %}
+                        <span>File loaded successfully</span>
+                    </li>
+                    <li class="flex items-center space-x-2">
+                        <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        <span>Required columns present: GMP, Amount Total</span>
+                    </li>
+                </ul>
+            </div>
+            
+            <!-- Budget File -->
+            <div class="border-b pb-4">
+                <h3 class="font-medium text-gray-900 mb-2">Budget File (budget.csv)</h3>
+                <ul class="space-y-2 text-sm">
+                    <li class="flex items-center space-x-2">
+                        {% if stats.budget_rows > 0 %}
+                        <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        {% else %}
+                        <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                        {% endif %}
+                        <span>File loaded successfully</span>
+                    </li>
+                    <li class="flex items-center space-x-2">
+                        <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        <span>Key columns present: Cost Code Tier 1/2, Budget Code, Current Budget, Committed Costs</span>
+                    </li>
+                </ul>
+            </div>
+            
+            <!-- Direct Costs File -->
+            <div class="border-b pb-4">
+                <h3 class="font-medium text-gray-900 mb-2">Direct Costs File (direct_costs_by_group.csv)</h3>
+                <ul class="space-y-2 text-sm">
+                    <li class="flex items-center space-x-2">
+                        {% if stats.direct_cost_rows > 0 %}
+                        <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        {% else %}
+                        <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                        {% endif %}
+                        <span>File loaded successfully</span>
+                    </li>
+                    <li class="flex items-center space-x-2">
+                        <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        <span>Key columns present: Cost Code, Vendor, Invoice #, Amount, Date</span>
+                    </li>
+                </ul>
+            </div>
+            
+            <!-- Allocations File -->
+            <div>
+                <h3 class="font-medium text-gray-900 mb-2">Allocations File (allocations.csv)</h3>
+                <ul class="space-y-2 text-sm">
+                    <li class="flex items-center space-x-2">
+                        <svg class="w-4 h-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                        </svg>
+                        <span class="text-yellow-700">Optional - Using 50/50 default split if not provided</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <!-- File Locations -->
+    <div class="card">
+        <h2 class="text-lg font-semibold mb-4">Expected File Locations</h2>
+        <div class="space-y-2 text-sm font-mono bg-gray-50 p-4 rounded-lg">
+            <div><span class="text-gray-500">./data/</span>GMP-Amount.xlsx</div>
+            <div><span class="text-gray-500">./data/</span>budget.csv</div>
+            <div><span class="text-gray-500">./data/</span>direct_costs_by_group.csv</div>
+            <div class="text-gray-400"><span class="text-gray-500">./data/</span>allocations.csv <span class="italic">(optional)</span></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
