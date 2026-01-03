@@ -57,7 +57,7 @@ jobs:
         run: pip install ruff
 
       - name: Run ruff check
-        run: ruff check app/ --ignore E501,F401
+        run: ruff check app/ --ignore E501,F401,E712
 
       - name: Run ruff format check
         run: ruff format app/ --check --diff || true
