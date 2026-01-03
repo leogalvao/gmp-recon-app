@@ -272,40 +272,103 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
     data_loader = get_data_loader()
 
     # Get mappings from database
-    budget_mappings = db.query(BudgetToGMP).all()
-    direct_mappings = db.query(DirectToBudget).all()
+    budget_mappings_db = db.query(BudgetToGMP).all()
+    direct_mappings_db = db.query(DirectToBudget).all()
     allocations = db.query(Allocation).all()
 
     # Get available options
     gmp_options = data_loader.gmp['GMP'].tolist()
     budget_options = data_loader.budget['Budget Code'].dropna().unique().tolist()
 
+    # Build lookup for budget descriptions
+    budget_desc_lookup = {}
+    budget_type_lookup = {}
+    for _, row in data_loader.budget.iterrows():
+        bc = row.get('Budget Code', '')
+        if bc:
+            budget_desc_lookup[bc] = row.get('Budget Code Description', '')
+            budget_type_lookup[bc] = row.get('Cost Type', '')
+
     # Get unmapped items
     gmp_df = data_loader.gmp.copy()
     budget_df = map_budget_to_gmp(data_loader.budget.copy(), gmp_df, db)
     direct_df = map_direct_to_budget(data_loader.direct_costs.copy(), budget_df, db)
 
-    unmapped_budget_df = budget_df[budget_df['gmp_division'].isna()][['Budget Code', 'Budget Code Description']]
+    # Build enriched budget mappings list (with descriptions)
+    budget_mappings = []
+    mapped_budget_codes = set()
+    for m in budget_mappings_db:
+        mapped_budget_codes.add(m.budget_code)
+        budget_mappings.append({
+            'budget_code': m.budget_code,
+            'gmp_division': m.gmp_division,
+            'confidence': m.confidence,
+            'description': budget_desc_lookup.get(m.budget_code, ''),
+            'cost_type': budget_type_lookup.get(m.budget_code, ''),
+            'mapping_method': 'database'
+        })
 
-    # Add suggested GMP mappings based on fuzzy matching
-    unmapped_budget = []
-    for _, row in unmapped_budget_df.iterrows():
-        item = row.to_dict()
-        desc = str(row.get('Budget Code Description', '') or '')
-        if desc and isinstance(desc, str) and len(desc) > 3:
-            # Find best match from GMP options
-            match = process.extractOne(desc, gmp_options, scorer=fuzz.token_set_ratio)
-            if match and match[1] >= 60:  # 60% confidence threshold
-                item['suggested_gmp'] = match[0]
-                item['confidence'] = match[1]
-        unmapped_budget.append(item)
+    # Get all budget items (both mapped and unmapped) for better overview
+    all_budget_items = []
+    for _, row in budget_df.iterrows():
+        bc = row.get('Budget Code', '')
+        item = {
+            'Budget Code': bc,
+            'Budget Code Description': row.get('Budget Code Description', ''),
+            'Cost Type': row.get('Cost Type', ''),
+            'division_key': row.get('division_key', ''),
+            'gmp_division': row.get('gmp_division'),
+            'mapping_confidence': row.get('mapping_confidence', 0),
+            'mapping_method': row.get('mapping_method', 'unmapped'),
+            'is_mapped': bc in mapped_budget_codes or row.get('gmp_division') is not None
+        }
+        # Add suggestion for unmapped items
+        if not item['is_mapped']:
+            desc = str(row.get('Budget Code Description', '') or '')
+            if desc and len(desc) > 3:
+                match = process.extractOne(desc, gmp_options, scorer=fuzz.token_set_ratio)
+                if match and match[1] >= 60:
+                    item['suggested_gmp'] = match[0]
+                    item['suggestion_confidence'] = match[1]
+        all_budget_items.append(item)
 
-    # Sort: items with suggestions first, then by confidence
-    # Ensure consistent types to avoid comparison errors (Budget Code could be NaN/float)
-    unmapped_budget.sort(key=lambda x: (-float(x.get('confidence', 0) or 0), str(x.get('Budget Code', '') or '')))
+    # Separate mapped vs unmapped for display
+    unmapped_budget = [b for b in all_budget_items if not b['is_mapped']]
+    mapped_budget = [b for b in all_budget_items if b['is_mapped']]
+
+    # Sort unmapped: items with suggestions first
+    unmapped_budget.sort(key=lambda x: (-float(x.get('suggestion_confidence', 0) or 0), str(x.get('Budget Code', '') or '')))
 
     # Count suggestions
     suggested_budget = [b for b in unmapped_budget if b.get('suggested_gmp')]
+
+    # Build direct cost lookup for enriching mapped items
+    direct_cost_lookup = {}
+    for _, row in data_loader.direct_costs.iterrows():
+        key = (row.get('Cost Code', ''), row.get('Name', ''))
+        direct_cost_lookup[key] = {
+            'Vendor': row.get('Vendor', ''),
+            'Amount': cents_to_display(int(row.get('amount_cents', 0))) if 'amount_cents' in row.index else row.get('Amount', ''),
+            'Type': row.get('Type', ''),
+            'Date': row.get('Date', ''),
+            'direct_cost_id': row.get('direct_cost_id', 0)
+        }
+
+    # Build enriched direct mappings list
+    direct_mappings = []
+    for m in direct_mappings_db:
+        key = (m.cost_code, m.name)
+        dc_info = direct_cost_lookup.get(key, {})
+        direct_mappings.append({
+            'cost_code': m.cost_code,
+            'name': m.name,
+            'budget_code': m.budget_code,
+            'confidence': m.confidence,
+            'vendor': dc_info.get('Vendor', ''),
+            'amount': dc_info.get('Amount', ''),
+            'type': dc_info.get('Type', ''),
+            'budget_description': budget_desc_lookup.get(m.budget_code, '')
+        })
 
     # Enhanced Direct Cost → Budget suggestions using suggestion engine
     unmapped_direct_df = direct_df[direct_df['mapped_budget_code'].isna()].copy()
@@ -363,6 +426,7 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
         "request": request,
         "active_tab": tab,
         "budget_mappings": budget_mappings,
+        "mapped_budget": mapped_budget,
         "direct_mappings": direct_mappings,
         "allocations": allocations,
         "gmp_options": gmp_options,
@@ -373,6 +437,8 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
         "direct_high": direct_high,
         "direct_medium": direct_medium,
         "direct_low": direct_low,
+        "total_budget": len(all_budget_items),
+        "total_direct": len(data_loader.direct_costs),
         "active_page": "mappings"
     })
 
@@ -405,9 +471,13 @@ async def save_mappings(
 
         elif mapping_type == "direct_to_budget":
             cost_code = form_data.get('cost_code')
+            name = form_data.get('name', '')
 
             if action == 'delete':
-                db.query(DirectToBudget).filter(DirectToBudget.cost_code == cost_code).delete()
+                db.query(DirectToBudget).filter(
+                    DirectToBudget.cost_code == cost_code,
+                    DirectToBudget.name == name
+                ).delete()
                 db.commit()
             else:
                 name = form_data.get('name')
