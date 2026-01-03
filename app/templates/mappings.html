@@ -1113,6 +1113,256 @@ function showToast(message, isError = false) {
     }, 3000);
 }
 
+// ============================================================
+// Searchable Budget Dropdown Component
+// ============================================================
+
+class SearchableDropdown {
+    constructor(selectElement) {
+        this.select = selectElement;
+        this.options = Array.from(selectElement.options).map(opt => ({
+            value: opt.value,
+            text: opt.textContent,
+            title: opt.title || '',
+            selected: opt.selected,
+            disabled: opt.disabled
+        }));
+        this.selectedValue = selectElement.value;
+        this.isOpen = false;
+        this.highlightedIndex = -1;
+        this.filteredOptions = [];
+
+        this.init();
+    }
+
+    init() {
+        // Create wrapper
+        this.wrapper = document.createElement('div');
+        this.wrapper.className = 'searchable-dropdown relative';
+
+        // Create search input
+        this.input = document.createElement('input');
+        this.input.type = 'text';
+        this.input.className = this.select.className + ' cursor-pointer';
+        this.input.placeholder = '-- Search budget code --';
+        this.input.setAttribute('autocomplete', 'off');
+        this.input.setAttribute('aria-label', 'Search budget code');
+        this.input.setAttribute('aria-haspopup', 'listbox');
+        this.input.setAttribute('aria-expanded', 'false');
+
+        // Set initial display value
+        const selectedOpt = this.options.find(o => o.value === this.selectedValue);
+        if (selectedOpt && selectedOpt.value) {
+            this.input.value = selectedOpt.text;
+        }
+
+        // Create dropdown container
+        this.dropdown = document.createElement('div');
+        this.dropdown.className = 'searchable-dropdown-menu absolute z-50 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto hidden';
+        this.dropdown.setAttribute('role', 'listbox');
+
+        // Create hidden input for form submission
+        this.hiddenInput = document.createElement('input');
+        this.hiddenInput.type = 'hidden';
+        this.hiddenInput.name = this.select.name;
+        this.hiddenInput.value = this.selectedValue;
+
+        // Copy data attributes to wrapper for event handlers
+        Array.from(this.select.attributes).forEach(attr => {
+            if (attr.name.startsWith('data-')) {
+                this.wrapper.setAttribute(attr.name, attr.value);
+            }
+        });
+
+        // Insert elements
+        this.select.parentNode.insertBefore(this.wrapper, this.select);
+        this.wrapper.appendChild(this.input);
+        this.wrapper.appendChild(this.dropdown);
+        this.wrapper.appendChild(this.hiddenInput);
+        this.select.style.display = 'none';
+
+        // Bind events
+        this.bindEvents();
+
+        // Initial render
+        this.filterOptions('');
+    }
+
+    bindEvents() {
+        // Input focus - show dropdown
+        this.input.addEventListener('focus', () => {
+            this.input.select();
+            this.open();
+        });
+
+        // Input typing - filter options
+        this.input.addEventListener('input', (e) => {
+            this.filterOptions(e.target.value);
+            this.open();
+        });
+
+        // Keyboard navigation
+        this.input.addEventListener('keydown', (e) => {
+            switch(e.key) {
+                case 'ArrowDown':
+                    e.preventDefault();
+                    this.highlightNext();
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    this.highlightPrev();
+                    break;
+                case 'Enter':
+                    e.preventDefault();
+                    if (this.highlightedIndex >= 0) {
+                        this.selectOption(this.filteredOptions[this.highlightedIndex]);
+                    }
+                    break;
+                case 'Escape':
+                    this.close();
+                    break;
+                case 'Tab':
+                    this.close();
+                    break;
+            }
+        });
+
+        // Click outside to close
+        document.addEventListener('click', (e) => {
+            if (!this.wrapper.contains(e.target)) {
+                this.close();
+            }
+        });
+    }
+
+    filterOptions(query) {
+        const q = query.toLowerCase().trim();
+
+        if (!q) {
+            // Show all non-disabled options (limit to 100 for performance)
+            this.filteredOptions = this.options.filter(o => !o.disabled && o.value).slice(0, 100);
+        } else {
+            // Filter by code or description
+            this.filteredOptions = this.options.filter(o => {
+                if (o.disabled || !o.value) return false;
+                const text = o.text.toLowerCase();
+                const title = o.title.toLowerCase();
+                return text.includes(q) || title.includes(q);
+            }).slice(0, 50); // Limit results for performance
+        }
+
+        this.highlightedIndex = this.filteredOptions.length > 0 ? 0 : -1;
+        this.renderDropdown();
+    }
+
+    renderDropdown() {
+        this.dropdown.innerHTML = '';
+
+        if (this.filteredOptions.length === 0) {
+            const noResults = document.createElement('div');
+            noResults.className = 'px-3 py-2 text-gray-500 text-sm';
+            noResults.textContent = 'No matching budget codes';
+            this.dropdown.appendChild(noResults);
+            return;
+        }
+
+        this.filteredOptions.forEach((opt, idx) => {
+            const item = document.createElement('div');
+            item.className = 'searchable-dropdown-item px-3 py-2 cursor-pointer text-sm hover:bg-blue-50 ' +
+                (idx === this.highlightedIndex ? 'bg-blue-100' : '') +
+                (opt.value === this.selectedValue ? ' font-medium text-blue-700' : '');
+            item.setAttribute('role', 'option');
+            item.setAttribute('data-value', opt.value);
+            item.setAttribute('title', opt.title);
+
+            // Highlight matching text
+            item.textContent = opt.text;
+
+            item.addEventListener('click', () => {
+                this.selectOption(opt);
+            });
+
+            item.addEventListener('mouseenter', () => {
+                this.highlightedIndex = idx;
+                this.updateHighlight();
+            });
+
+            this.dropdown.appendChild(item);
+        });
+    }
+
+    updateHighlight() {
+        const items = this.dropdown.querySelectorAll('.searchable-dropdown-item');
+        items.forEach((item, idx) => {
+            item.classList.toggle('bg-blue-100', idx === this.highlightedIndex);
+        });
+
+        // Scroll highlighted item into view
+        if (this.highlightedIndex >= 0 && items[this.highlightedIndex]) {
+            items[this.highlightedIndex].scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    highlightNext() {
+        if (this.filteredOptions.length === 0) return;
+        this.highlightedIndex = (this.highlightedIndex + 1) % this.filteredOptions.length;
+        this.updateHighlight();
+    }
+
+    highlightPrev() {
+        if (this.filteredOptions.length === 0) return;
+        this.highlightedIndex = this.highlightedIndex <= 0
+            ? this.filteredOptions.length - 1
+            : this.highlightedIndex - 1;
+        this.updateHighlight();
+    }
+
+    selectOption(opt) {
+        this.selectedValue = opt.value;
+        this.input.value = opt.text;
+        this.hiddenInput.value = opt.value;
+        this.select.value = opt.value;
+
+        // Trigger change event on original select
+        this.select.dispatchEvent(new Event('change', { bubbles: true }));
+
+        this.close();
+    }
+
+    open() {
+        if (this.isOpen) return;
+        this.isOpen = true;
+        this.dropdown.classList.remove('hidden');
+        this.input.setAttribute('aria-expanded', 'true');
+    }
+
+    close() {
+        if (!this.isOpen) return;
+        this.isOpen = false;
+        this.dropdown.classList.add('hidden');
+        this.input.setAttribute('aria-expanded', 'false');
+
+        // Restore display value if no selection made
+        const selectedOpt = this.options.find(o => o.value === this.selectedValue);
+        if (selectedOpt && selectedOpt.value) {
+            this.input.value = selectedOpt.text;
+        } else {
+            this.input.value = '';
+        }
+    }
+}
+
+// Initialize searchable dropdowns
+function initSearchableDropdowns() {
+    const budgetSelects = document.querySelectorAll('.budget-select');
+    budgetSelects.forEach(select => {
+        // Only convert if it has many options (performance optimization)
+        if (select.options.length > 20) {
+            new SearchableDropdown(select);
+        }
+    });
+}
+
 // Initialize filters
 document.addEventListener('DOMContentLoaded', function() {
     // Budget → GMP tab filter
@@ -1126,6 +1376,9 @@ document.addEventListener('DOMContentLoaded', function() {
     if (filterDirectSelect) {
         filterDirectByStatus(filterDirectSelect.value);
     }
+
+    // Initialize searchable budget dropdowns
+    initSearchableDropdowns();
 });
 </script>
 
@@ -1138,6 +1391,55 @@ document.addEventListener('DOMContentLoaded', function() {
 }
 .tab-btn.active {
     @apply bg-blue-600 text-white;
+}
+
+/* Searchable Dropdown Styles */
+.searchable-dropdown {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+}
+
+.searchable-dropdown-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 2px;
+    background: white;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    max-height: 15rem;
+    overflow-y: auto;
+    z-index: 50;
+}
+
+.searchable-dropdown-item {
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.searchable-dropdown-item:hover {
+    background-color: #eff6ff;
+}
+
+.searchable-dropdown-item.highlighted {
+    background-color: #dbeafe;
+}
+
+.searchable-dropdown-item.selected {
+    font-weight: 500;
+    color: #1d4ed8;
+}
+
+/* Ensure dropdown appears above other elements */
+.searchable-dropdown-menu:not(.hidden) {
+    display: block;
 }
 </style>
 {% endblock %}
