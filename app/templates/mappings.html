@@ -188,22 +188,21 @@
     </div>
 
     {% elif active_tab == 'direct_to_budget' %}
-    <!-- Direct Cost to Budget Mapping - Enhanced UI -->
+    <!-- Direct Cost to Budget Mapping - Unified Table UI -->
     <div class="space-y-6">
         <!-- Search/Filter Controls -->
         <div class="flex flex-wrap gap-4 items-center">
             <div class="flex-1 min-w-64">
-                <input type="text" id="searchDirect" placeholder="Search by vendor, cost code, name, invoice..."
+                <input type="text" id="searchDirect" placeholder="Search by vendor, cost code, name..."
                     class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     onkeyup="filterDirectTable(this.value)">
             </div>
             <div class="flex items-center gap-2">
-                <label class="text-sm text-gray-600">Filter:</label>
-                <select id="filterConfidence" onchange="filterByConfidence(this.value)" class="border rounded-lg px-3 py-2">
-                    <option value="all">All Items</option>
-                    <option value="high">High Confidence (≥85%)</option>
-                    <option value="medium">Medium Confidence (60-84%)</option>
-                    <option value="low">Low/No Suggestion</option>
+                <label class="text-sm text-gray-600">Show:</label>
+                <select id="filterDirectStatus" onchange="filterDirectByStatus(this.value)" class="border rounded-lg px-3 py-2">
+                    <option value="all">All Items ({{ total_direct }})</option>
+                    <option value="unmapped" selected>Unmapped Only ({{ unmapped_direct|length }})</option>
+                    <option value="mapped">Mapped Only ({{ mapped_direct|length }})</option>
                 </select>
             </div>
             <div class="flex items-center gap-2">
@@ -219,25 +218,29 @@
         </div>
 
         <!-- Progress Stats -->
-        <div class="grid grid-cols-4 gap-4">
-            <div class="bg-gray-50 rounded-lg p-4 text-center">
-                <div class="text-2xl font-bold text-gray-700">{{ direct_mappings|length }}</div>
-                <div class="text-sm text-gray-600">Already Mapped</div>
+        <div class="grid grid-cols-5 gap-4 text-center">
+            <div class="bg-blue-50 rounded-lg p-3">
+                <div class="text-2xl font-bold text-blue-600">{{ total_direct }}</div>
+                <div class="text-sm text-blue-700">Total Items</div>
             </div>
-            <div class="bg-green-50 rounded-lg p-4 text-center border-2 border-green-200">
-                <div class="text-2xl font-bold text-green-600">{{ direct_high|default(0) }}</div>
-                <div class="text-sm text-green-700">High Confidence</div>
-                <div class="text-xs text-green-500">≥85% match</div>
+            <div class="bg-green-50 rounded-lg p-3 border-2 border-green-200">
+                <div class="text-2xl font-bold text-green-600">{{ mapped_direct|length }}</div>
+                <div class="text-sm text-green-700">Mapped</div>
             </div>
-            <div class="bg-yellow-50 rounded-lg p-4 text-center border-2 border-yellow-200">
+            <div class="bg-emerald-50 rounded-lg p-3">
+                <div class="text-2xl font-bold text-emerald-600">{{ direct_high|default(0) }}</div>
+                <div class="text-sm text-emerald-700">High Conf.</div>
+                <div class="text-xs text-emerald-500">≥85%</div>
+            </div>
+            <div class="bg-yellow-50 rounded-lg p-3">
                 <div class="text-2xl font-bold text-yellow-600">{{ direct_medium|default(0) }}</div>
-                <div class="text-sm text-yellow-700">Medium Confidence</div>
-                <div class="text-xs text-yellow-500">60-84% match</div>
+                <div class="text-sm text-yellow-700">Medium</div>
+                <div class="text-xs text-yellow-500">60-84%</div>
             </div>
-            <div class="bg-red-50 rounded-lg p-4 text-center border-2 border-red-200">
+            <div class="bg-red-50 rounded-lg p-3">
                 <div class="text-2xl font-bold text-red-600">{{ direct_low|default(0) }}</div>
                 <div class="text-sm text-red-700">Needs Review</div>
-                <div class="text-xs text-red-500">&lt;60% match</div>
+                <div class="text-xs text-red-500">&lt;60%</div>
             </div>
         </div>
 
@@ -246,7 +249,7 @@
         <div class="bg-green-50 border border-green-200 rounded-lg p-4 flex justify-between items-center">
             <div>
                 <span class="font-medium text-green-800">{{ direct_high }} items ready for bulk accept</span>
-                <p class="text-sm text-green-600">These have high-confidence matches (≥85%) and can be accepted automatically.</p>
+                <p class="text-sm text-green-600">High-confidence matches (≥85%) can be accepted automatically.</p>
             </div>
             <button onclick="bulkAcceptHighConfidence()" id="bulkAcceptBtn"
                     class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
@@ -258,28 +261,28 @@
         </div>
         {% endif %}
 
-        <!-- Mapping Table -->
-        <div class="border rounded-lg overflow-hidden">
+        <!-- Unified Mapping Table -->
+        <div class="border rounded-lg overflow-hidden max-h-[600px] overflow-y-auto">
             <table class="w-full text-sm" id="directTable">
                 <thead class="bg-gray-50 sticky top-0">
                     <tr>
-                        <th class="px-3 py-3 text-left font-semibold text-gray-700 w-10">
-                            <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)" class="rounded">
-                        </th>
                         <th class="px-3 py-3 text-left font-semibold text-gray-700">Vendor</th>
-                        <th class="px-3 py-3 text-left font-semibold text-gray-700">Cost Code</th>
+                        <th class="px-3 py-3 text-left font-semibold text-gray-700 w-28">Cost Code</th>
                         <th class="px-3 py-3 text-left font-semibold text-gray-700">Name</th>
-                        <th class="px-3 py-3 text-left font-semibold text-gray-700 w-24">Amount</th>
-                        <th class="px-3 py-3 text-center font-semibold text-gray-700 w-16">Type</th>
-                        <th class="px-3 py-3 text-left font-semibold text-gray-700">Suggested Budget</th>
-                        <th class="px-3 py-3 text-center font-semibold text-gray-700 w-28">Action</th>
+                        <th class="px-3 py-3 text-right font-semibold text-gray-700 w-24">Amount</th>
+                        <th class="px-3 py-3 text-center font-semibold text-gray-700 w-14">Type</th>
+                        <th class="px-3 py-3 text-left font-semibold text-gray-700 w-72">Budget Code Mapping</th>
+                        <th class="px-3 py-3 text-center font-semibold text-gray-700 w-16">Status</th>
+                        <th class="px-3 py-3 text-center font-semibold text-gray-700 w-24">Action</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y" id="directTableBody">
+                    <!-- Unmapped Items -->
                     {% for item in unmapped_direct %}
                     {% set conf_band = item.get('confidence_band', 'low') %}
                     {% set top_sugg = item.get('top_suggestion') %}
                     <tr class="hover:bg-blue-50 transition-colors {% if conf_band == 'high' %}bg-green-50{% elif conf_band == 'medium' %}bg-yellow-50{% endif %}"
+                        data-status="unmapped"
                         data-dc-id="{{ item.get('direct_cost_id', '') }}"
                         data-code="{{ item.get('Cost Code', '') }}"
                         data-name="{{ item.get('Name', '') }}"
@@ -287,26 +290,23 @@
                         data-type="{{ item.get('Type', '') }}"
                         data-confidence="{{ item.get('confidence', 0) }}"
                         data-band="{{ conf_band }}">
-                        <td class="px-3 py-3">
-                            <input type="checkbox" class="row-select rounded" data-dc-id="{{ item.get('direct_cost_id', '') }}">
+                        {% set vendor_val = item.get('Vendor', '') %}
+                        {% set vendor_str = vendor_val if vendor_val is string and vendor_val == vendor_val else '' %}
+                        <td class="px-3 py-2 text-gray-600 max-w-32 truncate" title="{{ vendor_str }}">
+                            {{ (vendor_str or 'N/A')[:20] }}
                         </td>
-                        <td class="px-3 py-3 text-gray-600 max-w-32 truncate" title="{{ item.get('Vendor', '') }}">
-                            {{ (item.get('Vendor', '') or 'N/A')[:25] }}
+                        <td class="px-3 py-2">
+                            <span class="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{{ item.get('Cost Code', '') }}</span>
                         </td>
-                        <td class="px-3 py-3">
-                            <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{{ item.get('Cost Code', '') }}</span>
-                        </td>
-                        <td class="px-3 py-3 text-gray-600 max-w-48">
-                            <span class="truncate block" title="{{ item.get('Name', '') }}">
-                                {{ (item.get('Name', '') or 'N/A')[:40] }}{% if (item.get('Name', '')|length) > 40 %}...{% endif %}
+                        <td class="px-3 py-2 text-gray-600">
+                            <span class="truncate block max-w-48" title="{{ item.get('Name', '') }}">
+                                {{ (item.get('Name', '') or 'N/A')[:35] }}{% if (item.get('Name', '')|length) > 35 %}...{% endif %}
                             </span>
                         </td>
-                        <td class="px-3 py-3 text-right font-mono text-sm">
-                            {{ item.get('Amount', '') }}
-                        </td>
-                        <td class="px-3 py-3 text-center">
+                        <td class="px-3 py-2 text-right font-mono text-sm">{{ item.get('Amount', '') }}</td>
+                        <td class="px-3 py-2 text-center">
                             {% set type_code = item.get('Type', '') %}
-                            <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold
+                            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold
                                 {% if type_code == 'L' %}bg-blue-100 text-blue-700
                                 {% elif type_code == 'M' %}bg-purple-100 text-purple-700
                                 {% elif type_code == 'S' %}bg-orange-100 text-orange-700
@@ -314,81 +314,137 @@
                                 {{ type_code or '?' }}
                             </span>
                         </td>
-                        <td class="px-3 py-3">
-                            {% if top_sugg %}
+                        <td class="px-3 py-2">
                             <div class="flex items-center gap-2">
-                                <!-- Confidence Badge -->
-                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
+                                {% if top_sugg %}
+                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium shrink-0
                                     {% if conf_band == 'high' %}bg-green-100 text-green-800
                                     {% elif conf_band == 'medium' %}bg-yellow-100 text-yellow-800
                                     {% else %}bg-gray-100 text-gray-600{% endif %}">
                                     {{ item.get('confidence', 0)|int }}%
                                 </span>
-                                <!-- Budget Dropdown with suggestion pre-selected -->
+                                {% else %}
+                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 shrink-0">
+                                    Manual
+                                </span>
+                                {% endif %}
                                 <select class="budget-select flex-1 border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500
-                                    {% if conf_band == 'high' %}border-green-300{% elif conf_band == 'medium' %}border-yellow-300{% endif %}"
+                                    {% if conf_band == 'high' %}border-green-300{% elif conf_band == 'medium' %}border-yellow-300{% elif not top_sugg %}border-red-300{% endif %}"
                                         data-dc-id="{{ item.get('direct_cost_id', '') }}"
                                         data-cost-code="{{ item.get('Cost Code', '') }}"
                                         data-name="{{ item.get('Name', '') }}"
                                         data-vendor="{{ item.get('Vendor', '') }}"
-                                        data-suggested="{{ top_sugg.get('budget_code', '') }}"
+                                        data-suggested="{{ top_sugg.get('budget_code', '') if top_sugg else '' }}"
                                         data-score="{{ item.get('confidence', 0) }}"
+                                        data-original=""
                                         onchange="enableSaveButton(this)">
-                                    <option value="">-- Select --</option>
-                                    <!-- Suggested option first -->
+                                    <option value="">-- Select Budget --</option>
+                                    {% if top_sugg %}
                                     <option value="{{ top_sugg.get('budget_code', '') }}" selected class="font-medium">
-                                        ★ {{ top_sugg.get('budget_code', '') }} - {{ top_sugg.get('description', '')[:30] }}
+                                        ★ {{ top_sugg.get('budget_code', '') }} - {{ top_sugg.get('description', '')[:25] }}
                                     </option>
-                                    <!-- Other suggestions -->
                                     {% for sugg in item.get('suggestions', [])[1:] %}
-                                    <option value="{{ sugg.get('budget_code', '') }}" class="text-gray-600">
-                                        {{ sugg.get('budget_code', '') }} ({{ sugg.get('score', 0)|int }}%)
-                                    </option>
+                                    <option value="{{ sugg.get('budget_code', '') }}">{{ sugg.get('budget_code', '') }} ({{ sugg.get('score', 0)|int }}%)</option>
                                     {% endfor %}
                                     <option disabled>──────────</option>
-                                    <!-- All budget options -->
+                                    {% endif %}
                                     {% for bc in budget_options %}
-                                    {% if bc != top_sugg.get('budget_code', '') %}
+                                    {% if not top_sugg or bc != top_sugg.get('budget_code', '') %}
                                     <option value="{{ bc }}">{{ bc }}</option>
                                     {% endif %}
                                     {% endfor %}
                                 </select>
-                                <!-- Info button for score breakdown -->
+                                {% if top_sugg %}
                                 <button onclick="showScoreBreakdown({{ item.get('direct_cost_id', 0) }})"
-                                        class="text-gray-400 hover:text-blue-600" title="View score breakdown">
+                                        class="text-gray-400 hover:text-blue-600 shrink-0" title="View score breakdown">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                     </svg>
                                 </button>
+                                {% endif %}
                             </div>
-                            {% else %}
-                            <!-- No suggestion - manual selection -->
+                        </td>
+                        <td class="px-3 py-2 text-center">
+                            <span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">unmapped</span>
+                        </td>
+                        <td class="px-3 py-2 text-center">
+                            <button onclick="saveDirectMapping(this)"
+                                    class="save-btn px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                    {% if not top_sugg %}disabled{% endif %}>
+                                Save
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+
+                    <!-- Mapped Items -->
+                    {% for item in mapped_direct %}
+                    <tr class="bg-green-50 hover:bg-green-100 transition-colors"
+                        data-status="mapped"
+                        data-dc-id="{{ item.get('direct_cost_id', '') }}"
+                        data-code="{{ item.get('Cost Code', '') }}"
+                        data-name="{{ item.get('Name', '') }}"
+                        data-vendor="{{ item.get('Vendor', '') }}"
+                        data-type="{{ item.get('Type', '') }}"
+                        data-band="mapped">
+                        {% set vendor_val = item.get('Vendor', '') %}
+                        {% set vendor_str = vendor_val if vendor_val is string and vendor_val == vendor_val else '' %}
+                        <td class="px-3 py-2 text-gray-600 max-w-32 truncate" title="{{ vendor_str }}">
+                            {{ (vendor_str or 'N/A')[:20] }}
+                        </td>
+                        <td class="px-3 py-2">
+                            <span class="font-mono text-xs bg-green-200 px-1.5 py-0.5 rounded">{{ item.get('Cost Code', '') }}</span>
+                        </td>
+                        <td class="px-3 py-2 text-gray-600">
+                            <span class="truncate block max-w-48" title="{{ item.get('Name', '') }}">
+                                {{ (item.get('Name', '') or 'N/A')[:35] }}{% if (item.get('Name', '')|length) > 35 %}...{% endif %}
+                            </span>
+                        </td>
+                        <td class="px-3 py-2 text-right font-mono text-sm">{{ item.get('Amount', '') }}</td>
+                        <td class="px-3 py-2 text-center">
+                            {% set type_code = item.get('Type', '') %}
+                            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold
+                                {% if type_code == 'L' %}bg-blue-100 text-blue-700
+                                {% elif type_code == 'M' %}bg-purple-100 text-purple-700
+                                {% elif type_code == 'S' %}bg-orange-100 text-orange-700
+                                {% else %}bg-gray-100 text-gray-700{% endif %}">
+                                {{ type_code or '?' }}
+                            </span>
+                        </td>
+                        <td class="px-3 py-2">
                             <div class="flex items-center gap-2">
-                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
-                                    Manual
+                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 shrink-0">
+                                    ✓
                                 </span>
-                                <select class="budget-select flex-1 border border-red-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500"
+                                <select class="budget-select flex-1 border border-green-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 bg-white"
                                         data-dc-id="{{ item.get('direct_cost_id', '') }}"
                                         data-cost-code="{{ item.get('Cost Code', '') }}"
                                         data-name="{{ item.get('Name', '') }}"
                                         data-vendor="{{ item.get('Vendor', '') }}"
                                         data-suggested=""
-                                        data-score="0"
-                                        onchange="enableSaveButton(this)">
-                                    <option value="">-- Select Budget --</option>
+                                        data-score="100"
+                                        data-original="{{ item.get('mapped_budget_code', '') }}"
+                                        onchange="enableDirectEditButton(this)">
                                     {% for bc in budget_options %}
-                                    <option value="{{ bc }}">{{ bc }}</option>
+                                    <option value="{{ bc }}" {% if bc == item.get('mapped_budget_code') %}selected{% endif %}>{{ bc }}</option>
                                     {% endfor %}
                                 </select>
                             </div>
-                            {% endif %}
                         </td>
-                        <td class="px-3 py-3 text-center">
-                            <button onclick="saveDirectMapping(this)"
-                                    class="save-btn px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                                    {% if not top_sugg %}disabled{% endif %}>
-                                {% if top_sugg and conf_band == 'high' %}Accept{% else %}Save{% endif %}
-                            </button>
+                        <td class="px-3 py-2 text-center">
+                            <span class="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">mapped</span>
+                        </td>
+                        <td class="px-3 py-2 text-center">
+                            <div class="flex gap-1 justify-center">
+                                <button onclick="saveDirectMapping(this)"
+                                        class="save-btn px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors hidden">
+                                    Update
+                                </button>
+                                <button onclick="deleteDirectMapping('{{ item.get('Cost Code', '') }}', '{{ item.get('Name', '')|e }}')"
+                                        class="delete-btn px-2 py-1 text-red-600 hover:text-red-800 text-xs hover:bg-red-50 rounded">
+                                    Remove
+                                </button>
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
@@ -396,81 +452,22 @@
             </table>
         </div>
 
-        <!-- Pagination Info -->
+        <!-- Footer Info -->
         <div class="flex justify-between items-center text-sm text-gray-500">
-            <span>Showing {{ unmapped_direct|length }} unmapped items</span>
-            <span>Total: {{ total_direct }} | Mapped: {{ direct_mappings|length }}</span>
+            <span>{{ unmapped_direct|length }} unmapped, {{ mapped_direct|length }} mapped</span>
+            <span>Total: {{ total_direct }} direct cost items</span>
         </div>
 
-        {% if not unmapped_direct %}
-        <div class="text-center py-12 text-green-600">
-            <svg class="w-20 h-20 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        {% if not unmapped_direct and not mapped_direct %}
+        <div class="text-center py-12 text-gray-500">
+            <p class="text-xl">No direct cost items found.</p>
+        </div>
+        {% elif not unmapped_direct %}
+        <div class="text-center py-8 text-green-600 bg-green-50 rounded-lg">
+            <svg class="w-16 h-16 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
-            <p class="text-xl font-medium">All direct cost items are mapped!</p>
-            <p class="text-gray-500 mt-2">Great job - your reconciliation is complete.</p>
-        </div>
-        {% endif %}
-
-        <!-- Already Mapped Items (collapsible) -->
-        {% if direct_mappings %}
-        <div class="border rounded-lg">
-            <button onclick="toggleMappedDirect()" class="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 flex justify-between items-center text-left">
-                <span class="font-medium text-gray-700">
-                    Already Mapped Items ({{ direct_mappings|length }})
-                </span>
-                <svg id="mappedDirectArrow" class="w-5 h-5 text-gray-500 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                </svg>
-            </button>
-            <div id="mappedDirectTable" class="hidden">
-                <table class="w-full text-sm">
-                    <thead class="bg-green-50">
-                        <tr>
-                            <th class="px-3 py-2 text-left font-semibold text-gray-700">Vendor</th>
-                            <th class="px-3 py-2 text-left font-semibold text-gray-700">Cost Code</th>
-                            <th class="px-3 py-2 text-left font-semibold text-gray-700">Name</th>
-                            <th class="px-3 py-2 text-right font-semibold text-gray-700">Amount</th>
-                            <th class="px-3 py-2 text-center font-semibold text-gray-700">Type</th>
-                            <th class="px-3 py-2 text-left font-semibold text-gray-700">Mapped To</th>
-                            <th class="px-3 py-2 text-center font-semibold text-gray-700 w-20">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y">
-                        {% for m in direct_mappings %}
-                        <tr class="bg-green-50 hover:bg-green-100">
-                            <td class="px-3 py-2 text-gray-600 max-w-24 truncate" title="{{ m.vendor }}">{{ (m.vendor or 'N/A')[:20] }}</td>
-                            <td class="px-3 py-2">
-                                <span class="font-mono text-xs bg-green-200 px-1.5 py-0.5 rounded">{{ m.cost_code }}</span>
-                            </td>
-                            <td class="px-3 py-2 text-gray-600 max-w-32 truncate" title="{{ m.name }}">{{ (m.name or '')[:30] }}</td>
-                            <td class="px-3 py-2 text-right font-mono text-sm">{{ m.amount }}</td>
-                            <td class="px-3 py-2 text-center">
-                                <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold
-                                    {% if m.type == 'L' %}bg-blue-100 text-blue-700
-                                    {% elif m.type == 'M' %}bg-purple-100 text-purple-700
-                                    {% elif m.type == 'S' %}bg-orange-100 text-orange-700
-                                    {% else %}bg-gray-100 text-gray-700{% endif %}">
-                                    {{ m.type or '?' }}
-                                </span>
-                            </td>
-                            <td class="px-3 py-2">
-                                <span class="inline-flex items-center gap-1">
-                                    <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                                    <span class="font-medium text-sm text-green-700">{{ m.budget_code }}</span>
-                                </span>
-                            </td>
-                            <td class="px-3 py-2 text-center">
-                                <button onclick="deleteDirectMapping('{{ m.cost_code }}', '{{ m.name|e }}')"
-                                        class="text-red-600 hover:text-red-800 text-xs hover:bg-red-50 px-2 py-1 rounded">
-                                    Remove
-                                </button>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+            <p class="text-lg font-medium">All direct cost items are mapped!</p>
         </div>
         {% endif %}
     </div>
@@ -826,6 +823,35 @@ function filterByConfidence(band) {
     });
 }
 
+// Filter direct cost table by mapping status
+function filterDirectByStatus(status) {
+    const rows = document.querySelectorAll('#directTableBody tr');
+
+    rows.forEach(row => {
+        const rowStatus = row.dataset.status;
+        if (status === 'all') {
+            row.style.display = '';
+        } else {
+            row.style.display = rowStatus === status ? '' : 'none';
+        }
+    });
+}
+
+// Enable edit button when mapped direct cost item is changed
+function enableDirectEditButton(select) {
+    const row = select.closest('tr');
+    const btn = row.querySelector('.save-btn');
+    const original = select.dataset.original;
+    const changed = select.value !== original;
+
+    if (changed) {
+        btn.classList.remove('hidden');
+        btn.disabled = false;
+    } else {
+        btn.classList.add('hidden');
+    }
+}
+
 // Filter by cost type
 function filterByType(type) {
     const rows = document.querySelectorAll('#directTableBody tr');
@@ -1081,9 +1107,16 @@ function showToast(message, isError = false) {
 
 // Initialize filters
 document.addEventListener('DOMContentLoaded', function() {
+    // Budget → GMP tab filter
     const filterSelect = document.getElementById('filterStatus');
     if (filterSelect) {
         filterByStatus('budgetTable', filterSelect.value);
+    }
+
+    // Direct Cost → Budget tab filter
+    const filterDirectSelect = document.getElementById('filterDirectStatus');
+    if (filterDirectSelect) {
+        filterDirectByStatus(filterDirectSelect.value);
     }
 });
 </script>

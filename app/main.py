@@ -342,38 +342,17 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
     # Count suggestions
     suggested_budget = [b for b in unmapped_budget if b.get('suggested_gmp')]
 
-    # Build direct cost lookup for enriching mapped items
-    direct_cost_lookup = {}
-    for _, row in data_loader.direct_costs.iterrows():
-        key = (row.get('Cost Code', ''), row.get('Name', ''))
-        direct_cost_lookup[key] = {
-            'Vendor': row.get('Vendor', ''),
-            'Amount': cents_to_display(int(row.get('amount_cents', 0))) if 'amount_cents' in row.index else row.get('Amount', ''),
-            'Type': row.get('Type', ''),
-            'Date': row.get('Date', ''),
-            'direct_cost_id': row.get('direct_cost_id', 0)
-        }
-
-    # Build enriched direct mappings list
-    direct_mappings = []
+    # Build direct cost mappings lookup from database
+    direct_mappings_lookup = {}
     for m in direct_mappings_db:
         key = (m.cost_code, m.name)
-        dc_info = direct_cost_lookup.get(key, {})
-        direct_mappings.append({
-            'cost_code': m.cost_code,
-            'name': m.name,
+        direct_mappings_lookup[key] = {
             'budget_code': m.budget_code,
-            'confidence': m.confidence,
-            'vendor': dc_info.get('Vendor', ''),
-            'amount': dc_info.get('Amount', ''),
-            'type': dc_info.get('Type', ''),
-            'budget_description': budget_desc_lookup.get(m.budget_code, '')
-        })
+            'confidence': m.confidence
+        }
 
-    # Enhanced Direct Cost → Budget suggestions using suggestion engine
+    # Compute suggestions for ALL direct costs (for unmapped ones)
     unmapped_direct_df = direct_df[direct_df['mapped_budget_code'].isna()].copy()
-
-    # Compute suggestions for unmapped direct costs
     dc_suggestions = compute_all_suggestions(
         unmapped_direct_df,
         data_loader.budget,
@@ -382,11 +361,16 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
         top_k=3
     )
 
-    # Build unmapped direct list with suggestions
-    unmapped_direct = []
+    # Build ALL direct cost items list (both mapped and unmapped)
+    all_direct_items = []
     display_columns = ['Cost Code', 'Name', 'Vendor', 'Invoice', 'Date', 'Amount', 'Type']
-    for _, row in unmapped_direct_df.iterrows():
+
+    for _, row in data_loader.direct_costs.iterrows():
         dc_id = row.get('direct_cost_id', 0)
+        cost_code = row.get('Cost Code', '')
+        name = row.get('Name', '')
+        key = (cost_code, name)
+
         item = {col: row.get(col, '') for col in display_columns if col in row.index}
         item['direct_cost_id'] = dc_id
 
@@ -396,25 +380,46 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
         elif 'Amount' in row.index:
             item['Amount'] = row['Amount']
 
-        # Add suggestions
-        suggs = dc_suggestions.get(dc_id, [])
-        if suggs:
-            item['suggestions'] = suggs
-            item['top_suggestion'] = suggs[0]
-            item['confidence'] = suggs[0].get('score', 0)
-            item['confidence_band'] = suggs[0].get('confidence_band', 'low')
-        else:
+        # Check if mapped
+        if key in direct_mappings_lookup:
+            mapping = direct_mappings_lookup[key]
+            item['is_mapped'] = True
+            item['mapped_budget_code'] = mapping['budget_code']
+            item['mapping_confidence'] = mapping['confidence']
+            item['budget_description'] = budget_desc_lookup.get(mapping['budget_code'], '')
+            item['confidence_band'] = 'mapped'
             item['suggestions'] = []
             item['top_suggestion'] = None
-            item['confidence'] = 0
-            item['confidence_band'] = 'low'
+        else:
+            item['is_mapped'] = False
+            item['mapped_budget_code'] = None
+            item['mapping_confidence'] = 0
+            item['budget_description'] = ''
 
-        unmapped_direct.append(item)
+            # Add suggestions for unmapped items
+            suggs = dc_suggestions.get(dc_id, [])
+            if suggs:
+                item['suggestions'] = suggs
+                item['top_suggestion'] = suggs[0]
+                item['confidence'] = suggs[0].get('score', 0)
+                item['confidence_band'] = suggs[0].get('confidence_band', 'low')
+            else:
+                item['suggestions'] = []
+                item['top_suggestion'] = None
+                item['confidence'] = 0
+                item['confidence_band'] = 'low'
 
-    # Sort by confidence (high first)
+        all_direct_items.append(item)
+
+    # Separate for stats
+    unmapped_direct = [d for d in all_direct_items if not d['is_mapped']]
+    mapped_direct = [d for d in all_direct_items if d['is_mapped']]
+
+    # Sort unmapped by confidence (high first), mapped by cost code
     unmapped_direct.sort(key=lambda x: (-x.get('confidence', 0), str(x.get('Cost Code', ''))))
+    mapped_direct.sort(key=lambda x: str(x.get('Cost Code', '')))
 
-    # Limit for display
+    # Limit unmapped for display (keep all mapped)
     unmapped_direct = unmapped_direct[:500]
 
     # Count by confidence band
@@ -427,7 +432,7 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
         "active_tab": tab,
         "budget_mappings": budget_mappings,
         "mapped_budget": mapped_budget,
-        "direct_mappings": direct_mappings,
+        "mapped_direct": mapped_direct,
         "allocations": allocations,
         "gmp_options": gmp_options,
         "budget_options": budget_options,
@@ -438,7 +443,7 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
         "direct_medium": direct_medium,
         "direct_low": direct_low,
         "total_budget": len(all_budget_items),
-        "total_direct": len(data_loader.direct_costs),
+        "total_direct": len(all_direct_items),
         "active_page": "mappings"
     })
 
