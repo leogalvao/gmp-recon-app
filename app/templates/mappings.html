@@ -299,8 +299,10 @@
                             <span class="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{{ item.get('Cost Code', '') }}</span>
                         </td>
                         <td class="px-3 py-2 text-gray-600">
-                            <span class="truncate block max-w-48" title="{{ item.get('Name', '') }}">
-                                {{ (item.get('Name', '') or 'N/A')[:35] }}{% if (item.get('Name', '')|length) > 35 %}...{% endif %}
+                            {% set name_val = item.get('Name', '') %}
+                            {% set name_str = name_val if name_val is string and name_val == name_val else '' %}
+                            <span class="truncate block max-w-48" title="{{ name_str }}">
+                                {{ (name_str or 'N/A')[:35] }}{% if name_str|length > 35 %}...{% endif %}
                             </span>
                         </td>
                         <td class="px-3 py-2 text-right font-mono text-sm">{{ item.get('Amount', '') }}</td>
@@ -403,8 +405,10 @@
                             <span class="font-mono text-xs bg-green-200 px-1.5 py-0.5 rounded">{{ item.get('Cost Code', '') }}</span>
                         </td>
                         <td class="px-3 py-2 text-gray-600">
-                            <span class="truncate block max-w-48" title="{{ item.get('Name', '') }}">
-                                {{ (item.get('Name', '') or 'N/A')[:35] }}{% if (item.get('Name', '')|length) > 35 %}...{% endif %}
+                            {% set name_val = item.get('Name', '') %}
+                            {% set name_str = name_val if name_val is string and name_val == name_val else '' %}
+                            <span class="truncate block max-w-48" title="{{ name_str }}">
+                                {{ (name_str or 'N/A')[:35] }}{% if name_str|length > 35 %}...{% endif %}
                             </span>
                         </td>
                         <td class="px-3 py-2 text-right font-mono text-sm">{{ item.get('Amount', '') }}</td>
