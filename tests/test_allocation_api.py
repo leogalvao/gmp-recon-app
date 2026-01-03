@@ -3,6 +3,7 @@ Tests for the GMP Allocation Override API endpoints.
 """
 import pytest
 import sys
+from unittest.mock import patch, MagicMock
 sys.path.insert(0, '.')
 
 from fastapi.testclient import TestClient
@@ -18,6 +19,34 @@ engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": Fal
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+# Mock reconciliation result for tests
+MOCK_RECON_ROWS = [
+    {
+        'gmp_division': 'Concrete',
+        'gmp_amount_raw': 176753700,
+        'actual_west_raw': 35651147,
+        'actual_east_raw': 35651155,
+    },
+    {
+        'gmp_division': 'Aluminum & Glass',
+        'gmp_amount_raw': 50000000,
+        'actual_west_raw': 10000000,
+        'actual_east_raw': 10000000,
+    },
+    {
+        'gmp_division': 'Doors, Frames, & Hardware',
+        'gmp_amount_raw': 30000000,
+        'actual_west_raw': 5000000,
+        'actual_east_raw': 5000000,
+    },
+]
+
+
+def mock_run_full_reconciliation(db):
+    """Mock reconciliation for testing without data files."""
+    return {'recon_rows': MOCK_RECON_ROWS}
+
+
 def override_get_db():
     """Override database dependency for testing."""
     db = TestingSessionLocal()
@@ -29,15 +58,17 @@ def override_get_db():
 
 @pytest.fixture(scope="module")
 def client():
-    """Create test client with test database."""
+    """Create test client with test database and mocked reconciliation."""
     # Create tables
     Base.metadata.create_all(bind=engine)
 
     # Override dependency
     app.dependency_overrides[get_db] = override_get_db
 
-    with TestClient(app) as c:
-        yield c
+    # Patch reconciliation to avoid needing data files
+    with patch('app.main.run_full_reconciliation', mock_run_full_reconciliation):
+        with TestClient(app) as c:
+            yield c
 
     # Cleanup
     app.dependency_overrides.clear()
