@@ -1,0 +1,563 @@
+# ==============================================================================
+# GMP RECONCILIATION APP - MAPPING CONFIGURATION
+# ==============================================================================
+#
+# This YAML configuration file externalizes all mapping rules, division lookups,
+# scoring parameters, and allocation defaults for the GMP Reconciliation App.
+#
+# EDITING GUIDELINES:
+# - Use 2-space indentation (YAML standard)
+# - Strings with special characters should be quoted
+# - After editing, validate with: python -c "import yaml; yaml.safe_load(open('gmp_mapping_config.yaml'))"
+# - Changes take effect on next application restart or manual reload via /recompute
+#
+# VERSION HISTORY:
+# - v1.0.0 (2026-01-03): Initial externalized configuration from code audit
+#
+# ==============================================================================
+
+version: "1.0.0"
+last_updated: "2026-01-03"
+author: "Code Audit Process"
+
+# ==============================================================================
+# SECTION 1: GMP DIVISION DEFINITIONS
+# ==============================================================================
+# Maps division keys (from Cost Code Tier 2 prefix) to GMP division names.
+# The division key is extracted from codes like "1-010 - General Conditions" → "1"
+#
+# IMPORTANT: GMP names must EXACTLY match the values in GMP-Amount.xlsx
+# Including any trailing spaces or special characters!
+
+gmp_divisions:
+  # Format:
+  # division_key:
+  #   name: "Exact GMP Division Name"
+  #   aliases: [optional list of alternative names for fuzzy matching]
+  #   default_allocation:  # Optional override for regional split
+  #     west: 0.50
+  #     east: 0.50
+
+  "1":
+    name: "General Conditions"
+    aliases: ["General", "GC", "Gen Conditions"]
+    description: "Project overhead, supervision, temporary facilities"
+
+  "2":
+    name: "Site Demolition(No Abatement)"
+    aliases: ["Demolition", "Demo", "Site Demo"]
+    description: "Selective demolition excluding hazmat abatement"
+
+  "3":
+    name: "Sitework"
+    aliases: ["Site Work", "Site", "Earthwork"]
+    description: "Grading, excavation, site utilities"
+
+  "4":
+    name: "Concrete"
+    aliases: ["Concrete Work", "Cast-in-Place"]
+    description: "Foundations, slabs, structural concrete"
+
+  "5":
+    name: "Masonry"
+    aliases: ["Brick", "Block", "Stone"]
+    description: "CMU, brick veneer, stone work"
+
+  "6":
+    name: "Structural Steel"
+    aliases: ["Steel", "Structural", "Iron"]
+    description: "Steel framing, miscellaneous metals"
+
+  "7":
+    name: "Rough Carpentry, Drywall, Ceilings"
+    aliases: ["Carpentry", "Drywall", "Framing", "Ceilings"]
+    description: "Wood framing, gypsum board, acoustic ceilings"
+
+  "8":
+    name: "Architectural Millwork"
+    aliases: ["Millwork", "Casework", "Cabinets"]
+    description: "Custom woodwork, built-in cabinetry"
+
+  "9":
+    name: "Waterproofing"
+    aliases: ["Waterproof", "Dampproofing", "Below-Grade"]
+    description: "Foundation waterproofing, sealants"
+
+  "10":
+    name: "Roofing"
+    aliases: ["Roof", "Roofing Systems"]
+    description: "Roof systems, insulation, flashing"
+
+  "11":
+    name: "Doors, Frames, & Hardware"
+    aliases: ["Doors", "Hardware", "Door Hardware", "HM Frames"]
+    description: "Interior/exterior doors, frames, locksets"
+
+  "12":
+    name: "Overhead Door"
+    aliases: ["Overhead Doors", "Garage Doors", "Roll-Up Doors"]
+    description: "Coiling doors, sectional doors"
+
+  "13":
+    name: "Aluminum & Glass"
+    aliases: ["Curtain Wall", "Storefront", "Glazing", "Windows"]
+    description: "Curtain wall, storefronts, windows"
+
+  "14":
+    name: "Ceramic Tile"
+    aliases: ["Tile", "Porcelain", "Floor Tile", "Wall Tile"]
+    description: "Ceramic/porcelain tile flooring and walls"
+
+  "15":
+    name: "Flooring"
+    aliases: ["Floor", "VCT", "Carpet", "LVT", "Resilient"]
+    description: "Carpet, VCT, LVT, resilient flooring"
+
+  "16":
+    name: "Painting"
+    aliases: ["Paint", "Coatings", "Wall Finishes"]
+    description: "Interior/exterior painting, coatings"
+
+  "17":
+    name: "Signage"
+    aliases: ["Signs", "Wayfinding", "Graphics"]
+    description: "Interior signage, wayfinding, graphics"
+
+  "18":
+    name: "Specialties"
+    aliases: ["Toilet Partitions", "Accessories", "Lockers"]
+    description: "Toilet accessories, partitions, specialties"
+
+  "19":
+    name: "Food Service Equipment"
+    aliases: ["Kitchen Equipment", "Food Service", "Commercial Kitchen"]
+    description: "Commercial kitchen equipment"
+
+  "20":
+    name: "Furniture, Fixtures, & Equipment"
+    aliases: ["FFE", "FF&E", "Furniture", "Equipment"]
+    description: "Movable furniture, fixtures, equipment"
+
+  "21":
+    name: "Window Treatments"
+    aliases: ["Blinds", "Shades", "Window Coverings"]
+    description: "Blinds, shades, curtains"
+
+  "22":
+    name: "Elevators "  # NOTE: Trailing space matches source data!
+    aliases: ["Elevator", "Vertical Transportation", "Lifts"]
+    description: "Passenger and freight elevators"
+    notes: "Source data has trailing space - do not remove"
+
+  "23":
+    name: "Fire Protection"
+    aliases: ["Fire Sprinkler", "Sprinklers", "Fire Suppression"]
+    description: "Sprinkler systems, fire suppression"
+
+  "24":
+    name: "Plumbing & H.V.A.C"
+    aliases: ["Plumbing", "HVAC", "Mechanical", "PHVAC"]
+    description: "Plumbing fixtures, HVAC systems"
+
+  "25":
+    name: "Geotherm work"
+    aliases: ["Geothermal", "Ground Source", "Geo"]
+    description: "Geothermal heating/cooling systems"
+
+  "26":
+    name: "Electrical & Fire Alarm"
+    aliases: ["Electrical", "Fire Alarm", "FA", "Elec"]
+    description: "Power distribution, lighting, fire alarm"
+
+  "27":
+    name: "Low Voltage"
+    aliases: ["Low-Voltage", "Data", "Telecom", "AV"]
+    description: "Data/telecom, security, AV systems"
+
+  "28":
+    name: "Landscaping"
+    aliases: ["Landscape", "Hardscape", "Planting"]
+    description: "Site landscaping, irrigation, hardscape"
+
+  "29":
+    name: "Design Fees"
+    aliases: ["Design", "Architecture", "Engineering"]
+    description: "Architectural and engineering fees"
+    # Note: Some projects map this to General Conditions
+
+  "30":
+    name: "Preconstruction Fee"
+    aliases: ["Precon", "Preconstruction"]
+    description: "Preconstruction services fee"
+
+  "31":
+    name: "Design-Build Fee"
+    aliases: ["DB Fee", "Design Build"]
+    description: "Design-build delivery premium"
+
+
+# ==============================================================================
+# SECTION 2: FUZZY MATCHING CONFIGURATION
+# ==============================================================================
+# Controls how the system matches budget/cost descriptions to GMP divisions
+# when direct key lookup fails.
+
+fuzzy_matching:
+  # Enable/disable fuzzy matching entirely
+  enabled: true
+
+  # Scoring algorithms available: token_sort_ratio, token_set_ratio, partial_ratio, ratio
+  algorithm: "token_sort_ratio"
+
+  # Thresholds for different matching contexts
+  thresholds:
+    # Budget Code Description → GMP Division matching
+    budget_to_gmp:
+      min_confidence: 85  # Minimum score (0-100) to accept match
+      auto_accept: 95     # Score at which match is automatically applied
+      review_required: 70 # Scores between review_required and min_confidence flagged for review
+
+    # Cost Code Tier 2 Name → GMP Division matching (fallback)
+    tier2_to_gmp:
+      min_confidence: 80
+      auto_accept: 90
+      review_required: 65
+
+    # Direct Cost → Budget Code matching
+    direct_to_budget:
+      min_confidence: 60
+      auto_accept: 85
+      review_required: 40
+
+
+# ==============================================================================
+# SECTION 3: DIRECT COST → BUDGET SUGGESTION ENGINE
+# ==============================================================================
+# Configures the weighted scoring system for suggesting budget code matches.
+# Total weights must sum to 1.0
+
+suggestion_engine:
+  # Scoring weights
+  weights:
+    code_prefix_match: 0.40    # Base code prefix matching (e.g., "4-010" → "4-010-xxx")
+    cost_type_match: 0.20      # Labor/Material/Subcontract/Other compatibility
+    text_similarity: 0.30      # Fuzzy text matching on descriptions
+    historical_pattern: 0.10   # Boost from user feedback patterns
+
+  # Confidence bands for UI display
+  confidence_bands:
+    high:
+      min_score: 0.85
+      color: "#22c55e"  # Green
+      action: "auto_suggest"
+      description: "High confidence - suggestion displayed prominently"
+
+    medium:
+      min_score: 0.60
+      color: "#eab308"  # Yellow
+      action: "suggest_with_review"
+      description: "Medium confidence - requires user confirmation"
+
+    low:
+      min_score: 0.40
+      color: "#ef4444"  # Red
+      action: "no_suggestion"
+      description: "Low confidence - manual selection required"
+
+  # Cost type compatibility matrix
+  # Format: [source_type, target_type]: compatibility_score
+  cost_type_compatibility:
+    # Perfect matches
+    - types: ["L", "L"]
+      score: 1.0
+      description: "Labor to Labor"
+
+    - types: ["M", "M"]
+      score: 1.0
+      description: "Material to Material"
+
+    - types: ["S", "S"]
+      score: 1.0
+      description: "Subcontract to Subcontract"
+
+    - types: ["O", "O"]
+      score: 1.0
+      description: "Other to Other"
+
+    # Partial matches (often interchangeable)
+    - types: ["L", "S"]
+      score: 0.5
+      description: "Labor to Subcontract (often bundled)"
+
+    - types: ["S", "L"]
+      score: 0.5
+      description: "Subcontract to Labor"
+
+    - types: ["M", "S"]
+      score: 0.4
+      description: "Material to Subcontract (supply & install)"
+
+    - types: ["S", "M"]
+      score: 0.4
+      description: "Subcontract to Material"
+
+    # Alternate code mappings
+    - types: ["LB", "L"]
+      score: 1.0
+      description: "LB code to Labor"
+
+    - types: ["L", "LB"]
+      score: 1.0
+      description: "Labor to LB code"
+
+    - types: ["SC", "S"]
+      score: 1.0
+      description: "SC code to Subcontract"
+
+    - types: ["S", "SC"]
+      score: 1.0
+      description: "Subcontract to SC code"
+
+  # Default for unmapped combinations
+  default_score: 0.2
+
+
+# ==============================================================================
+# SECTION 4: REGIONAL ALLOCATION DEFAULTS
+# ==============================================================================
+# Default West/East allocation splits when no explicit rule exists.
+# These can be overridden per cost code in the allocations.csv file.
+
+allocations:
+  # Default split for unspecified cost codes
+  default:
+    west: 0.50
+    east: 0.50
+    confirmed: false
+    description: "Default 50/50 split - requires review"
+
+  # Override defaults by division
+  division_defaults:
+    "1":  # General Conditions - usually follows overall project split
+      west: 0.50
+      east: 0.50
+
+    "24":  # Plumbing & HVAC - may vary by building
+      west: 0.50
+      east: 0.50
+      notes: "Review actual building square footage split"
+
+    "26":  # Electrical - may vary by building
+      west: 0.50
+      east: 0.50
+      notes: "Review actual electrical load distribution"
+
+  # Validation rules
+  validation:
+    # Tolerance for pct_west + pct_east != 1.0
+    sum_tolerance: 0.001
+
+    # Require confirmation for splits different from 50/50
+    require_confirmation_if_unequal: true
+
+
+# ==============================================================================
+# SECTION 5: DUPLICATE DETECTION CONFIGURATION
+# ==============================================================================
+# Controls how potential duplicate transactions are identified.
+
+duplicate_detection:
+  enabled: true
+
+  # Detection methods
+  methods:
+    exact:
+      enabled: true
+      description: "Identical vendor, invoice, amount, and date"
+      auto_exclude: true  # Automatically exclude from actuals
+
+    fuzzy:
+      enabled: true
+      description: "Similar fields with configurable tolerance"
+      auto_exclude_threshold: 0.98  # Auto-exclude if score >= this
+
+      # Thresholds for fuzzy matching
+      thresholds:
+        vendor_similarity: 90      # 0-100 scale
+        amount_tolerance_pct: 0.01 # ±1% of amount
+        date_window_days: 7        # ±7 days
+        description_similarity: 70 # 0-100 scale
+
+      # Weight distribution for combined score
+      weights:
+        vendor: 0.30
+        amount: 0.30
+        date: 0.20
+        description: 0.20
+
+    reversal:
+      enabled: true
+      description: "Same details with opposite sign (credit/charge pair)"
+      auto_exclude: true
+
+
+# ==============================================================================
+# SECTION 6: ML FORECASTING CONFIGURATION
+# ==============================================================================
+# Controls the machine learning pipeline for EAC predictions.
+
+ml_forecasting:
+  enabled: true
+
+  # Model selection
+  models:
+    linear_regression:
+      enabled: true
+      min_data_points: 5
+      cv_splits: 5
+
+    mlp:
+      enabled: true
+      min_data_points: 18
+      architecture:
+        hidden_layer_1: 64
+        hidden_layer_2: 32
+        dropout: 0.1
+      training:
+        max_epochs: 100
+        patience: 10
+        learning_rate: 0.001
+
+  # Feature configuration
+  features:
+    time_based:
+      - month
+      - quarter
+      - day_of_year
+      - week_of_year
+      - year
+
+    rolling_windows_days:
+      - 30
+      - 60
+      - 90
+
+    lag_periods_months:
+      - 1
+      - 2
+
+  # Nightly retraining schedule
+  schedule:
+    enabled: true
+    cron: "0 2 * * *"  # 2:00 AM daily
+
+
+# ==============================================================================
+# SECTION 7: DATA VALIDATION RULES
+# ==============================================================================
+# Rules for validating input data quality.
+
+data_validation:
+  # Required columns by file type
+  required_columns:
+    gmp:
+      - "GMP"
+      - "Amount Total"
+
+    budget:
+      - "Cost Code Tier 1"
+      - "Cost Code Tier 2"
+      - "Budget Code"
+      - "Budget Code Description"
+      - "Current Budget"
+      - "Committed Costs"
+
+    direct_costs:
+      - "Cost Code"
+      - "Name"
+      - "Type"
+      - "Date"
+      - "Vendor"
+      - "Amount"
+
+  # Warning thresholds
+  warnings:
+    missing_vendor_pct: 0.05      # Warn if >5% missing vendors
+    zero_amount_pct: 0.10         # Warn if >10% zero amounts
+    invalid_date_pct: 0.02        # Warn if >2% invalid dates
+    unmapped_budget_pct: 0.15     # Warn if >15% unmapped to GMP
+
+
+# ==============================================================================
+# SECTION 8: UI CONFIGURATION
+# ==============================================================================
+# Controls display settings and user interface behavior.
+
+ui:
+  # Currency formatting
+  currency:
+    symbol: "$"
+    decimal_places: 2
+    thousands_separator: ","
+    negative_format: "-$X"  # or "($X)" for accounting style
+
+  # Table display
+  tables:
+    default_page_size: 50
+    sortable_columns: true
+    export_formats:
+      - csv
+      - xlsx
+
+  # Mapping editor
+  mapping_editor:
+    show_confidence_scores: true
+    highlight_low_confidence: true
+    low_confidence_threshold: 0.70
+
+
+# ==============================================================================
+# SECTION 9: AUDIT TRAIL CONFIGURATION
+# ==============================================================================
+# Controls logging and change tracking.
+
+audit:
+  # Track all mapping changes
+  track_mapping_changes: true
+
+  # Track allocation changes
+  track_allocation_changes: true
+
+  # Retention period for audit records (days)
+  retention_days: 365
+
+  # Fields to record
+  record_fields:
+    - "old_value"
+    - "new_value"
+    - "user"
+    - "timestamp"
+    - "source_ip"
+
+
+# ==============================================================================
+# SECTION 10: INTEGRATION SETTINGS
+# ==============================================================================
+# Configuration for external system integrations.
+
+integrations:
+  procore:
+    enabled: false
+    api_base_url: ""
+    # API credentials should be in environment variables, not here!
+    # PROCORE_CLIENT_ID and PROCORE_CLIENT_SECRET
+
+  # File change detection
+  file_watcher:
+    enabled: true
+    check_interval_minutes: 5
+    paths:
+      - "./data/GMP-Amount.xlsx"
+      - "./data/budget.csv"
+      - "./data/direct_costs_by_group.csv"
+      - "./data/allocations.csv"
