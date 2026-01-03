@@ -278,7 +278,28 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
 
     # Get available options
     gmp_options = data_loader.gmp['GMP'].tolist()
-    budget_options = data_loader.budget['Budget Code'].dropna().unique().tolist()
+
+    # Build budget options with descriptions for enhanced dropdown
+    # Format: list of dicts with 'code' and 'description'
+    budget_options = []
+    budget_codes_seen = set()
+    for _, row in data_loader.budget.iterrows():
+        bc = row.get('Budget Code', '')
+        if bc and bc not in budget_codes_seen:
+            budget_codes_seen.add(bc)
+            desc = row.get('Budget Code Description', '')
+            # Handle NaN/None descriptions
+            if desc is None or (isinstance(desc, float) and desc != desc):
+                desc = ''
+            else:
+                desc = str(desc).strip()
+            budget_options.append({
+                'code': bc,
+                'description': desc,
+                'display': f"{bc} – {desc[:40]}..." if len(desc) > 40 else f"{bc} – {desc}" if desc else f"{bc} – (No description)"
+            })
+    # Sort alphabetically by code
+    budget_options.sort(key=lambda x: x['code'])
 
     # Build lookup for budget descriptions
     budget_desc_lookup = {}

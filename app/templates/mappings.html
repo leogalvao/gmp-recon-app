@@ -328,7 +328,7 @@
                                     Manual
                                 </span>
                                 {% endif %}
-                                <select class="budget-select flex-1 border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500
+                                <select class="budget-select flex-1 border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 min-w-80
                                     {% if conf_band == 'high' %}border-green-300{% elif conf_band == 'medium' %}border-yellow-300{% elif not top_sugg %}border-red-300{% endif %}"
                                         data-dc-id="{{ item.get('direct_cost_id', '') }}"
                                         data-cost-code="{{ item.get('Cost Code', '') }}"
@@ -337,20 +337,27 @@
                                         data-suggested="{{ top_sugg.get('budget_code', '') if top_sugg else '' }}"
                                         data-score="{{ item.get('confidence', 0) }}"
                                         data-original=""
-                                        onchange="enableSaveButton(this)">
+                                        onchange="enableSaveButton(this)"
+                                        aria-label="Select budget code">
                                     <option value="">-- Select Budget --</option>
                                     {% if top_sugg %}
-                                    <option value="{{ top_sugg.get('budget_code', '') }}" selected class="font-medium">
-                                        ★ {{ top_sugg.get('budget_code', '') }} - {{ top_sugg.get('description', '')[:25] }}
+                                    {% set sugg_desc = top_sugg.get('description', '') %}
+                                    {% set sugg_desc_display = sugg_desc[:35] ~ '...' if sugg_desc|length > 35 else sugg_desc %}
+                                    <option value="{{ top_sugg.get('budget_code', '') }}" selected class="font-medium" title="{{ sugg_desc }}">
+                                        ★ {{ top_sugg.get('budget_code', '') }} – {{ sugg_desc_display or '(No description)' }} ({{ top_sugg.get('score', 0)|int }}%)
                                     </option>
                                     {% for sugg in item.get('suggestions', [])[1:] %}
-                                    <option value="{{ sugg.get('budget_code', '') }}">{{ sugg.get('budget_code', '') }} ({{ sugg.get('score', 0)|int }}%)</option>
+                                    {% set alt_desc = sugg.get('description', '') %}
+                                    {% set alt_desc_display = alt_desc[:30] ~ '...' if alt_desc|length > 30 else alt_desc %}
+                                    <option value="{{ sugg.get('budget_code', '') }}" title="{{ alt_desc }}">
+                                        {{ sugg.get('budget_code', '') }} – {{ alt_desc_display or '(No desc)' }} ({{ sugg.get('score', 0)|int }}%)
+                                    </option>
                                     {% endfor %}
                                     <option disabled>──────────</option>
                                     {% endif %}
                                     {% for bc in budget_options %}
-                                    {% if not top_sugg or bc != top_sugg.get('budget_code', '') %}
-                                    <option value="{{ bc }}">{{ bc }}</option>
+                                    {% if not top_sugg or bc.code != top_sugg.get('budget_code', '') %}
+                                    <option value="{{ bc.code }}" title="{{ bc.description }}">{{ bc.display }}</option>
                                     {% endif %}
                                     {% endfor %}
                                 </select>
@@ -416,7 +423,7 @@
                                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 shrink-0">
                                     ✓
                                 </span>
-                                <select class="budget-select flex-1 border border-green-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 bg-white"
+                                <select class="budget-select flex-1 border border-green-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 bg-white min-w-80"
                                         data-dc-id="{{ item.get('direct_cost_id', '') }}"
                                         data-cost-code="{{ item.get('Cost Code', '') }}"
                                         data-name="{{ item.get('Name', '') }}"
@@ -424,9 +431,10 @@
                                         data-suggested=""
                                         data-score="100"
                                         data-original="{{ item.get('mapped_budget_code', '') }}"
-                                        onchange="enableDirectEditButton(this)">
+                                        onchange="enableDirectEditButton(this)"
+                                        aria-label="Select budget code">
                                     {% for bc in budget_options %}
-                                    <option value="{{ bc }}" {% if bc == item.get('mapped_budget_code') %}selected{% endif %}>{{ bc }}</option>
+                                    <option value="{{ bc.code }}" title="{{ bc.description }}" {% if bc.code == item.get('mapped_budget_code') %}selected{% endif %}>{{ bc.display }}</option>
                                     {% endfor %}
                                 </select>
                             </div>
