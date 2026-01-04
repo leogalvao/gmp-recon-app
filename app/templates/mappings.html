@@ -1251,30 +1251,21 @@ class SearchableDropdown {
         this.isOpen = false;
         this.highlightedIndex = -1;
         this.filteredOptions = [];
+        this.scrollHandler = null;
+        this.resizeHandler = null;
 
         this.init();
     }
 
     init() {
-        // Get computed width before hiding select
-        const selectRect = this.select.getBoundingClientRect();
-        const selectWidth = selectRect.width;
-
-        // Create wrapper - use flex-1 to match parent flex layout
+        // Create wrapper
         this.wrapper = document.createElement('div');
         this.wrapper.className = 'searchable-dropdown';
-        this.wrapper.style.position = 'relative';
-        this.wrapper.style.flex = '1';
-        this.wrapper.style.minWidth = Math.max(selectWidth, 200) + 'px';
 
-        // Create search input - copy classes but remove problematic ones
+        // Create search input
         this.input = document.createElement('input');
         this.input.type = 'text';
-        const inputClasses = this.select.className
-            .replace('budget-select', '')
-            .replace('flex-1', '')
-            .replace('min-w-80', '');
-        this.input.className = inputClasses + ' w-full';
+        this.input.className = 'searchable-dropdown-input';
         this.input.placeholder = '-- Search budget code --';
         this.input.setAttribute('autocomplete', 'off');
         this.input.setAttribute('aria-label', 'Search budget code');
@@ -1287,9 +1278,9 @@ class SearchableDropdown {
             this.input.value = selectedOpt.text;
         }
 
-        // Create dropdown container with fixed positioning to avoid layout shifts
+        // Create dropdown container - append to body for proper positioning
         this.dropdown = document.createElement('div');
-        this.dropdown.className = 'searchable-dropdown-menu';
+        this.dropdown.className = 'searchable-dropdown-portal';
         this.dropdown.setAttribute('role', 'listbox');
         this.dropdown.style.display = 'none';
 
@@ -1299,37 +1290,34 @@ class SearchableDropdown {
         this.hiddenInput.name = this.select.name;
         this.hiddenInput.value = this.selectedValue;
 
-        // Copy data attributes to wrapper for event handlers
+        // Copy data attributes to wrapper
         Array.from(this.select.attributes).forEach(attr => {
             if (attr.name.startsWith('data-')) {
                 this.wrapper.setAttribute(attr.name, attr.value);
             }
         });
 
-        // Insert elements
+        // Insert wrapper where select was
         this.select.parentNode.insertBefore(this.wrapper, this.select);
         this.wrapper.appendChild(this.input);
-        this.wrapper.appendChild(this.dropdown);
         this.wrapper.appendChild(this.hiddenInput);
         this.select.style.display = 'none';
 
+        // Append dropdown to body (portal pattern)
+        document.body.appendChild(this.dropdown);
+
         // Bind events
         this.bindEvents();
-
-        // Initial render (don't filter yet, wait for open)
-        this.filteredOptions = [];
     }
 
     bindEvents() {
-        // Input focus - show dropdown
-        this.input.addEventListener('focus', (e) => {
-            e.stopPropagation();
-            this.input.select();
+        // Input focus
+        this.input.addEventListener('focus', () => {
             this.filterOptions('');
             this.open();
         });
 
-        // Input click - ensure dropdown stays open
+        // Input click
         this.input.addEventListener('click', (e) => {
             e.stopPropagation();
             if (!this.isOpen) {
@@ -1338,9 +1326,9 @@ class SearchableDropdown {
             }
         });
 
-        // Input typing - filter options
-        this.input.addEventListener('input', (e) => {
-            this.filterOptions(e.target.value);
+        // Input typing
+        this.input.addEventListener('input', () => {
+            this.filterOptions(this.input.value);
             if (!this.isOpen) this.open();
         });
 
@@ -1349,7 +1337,6 @@ class SearchableDropdown {
             switch(e.key) {
                 case 'ArrowDown':
                     e.preventDefault();
-                    e.stopPropagation();
                     if (!this.isOpen) {
                         this.filterOptions('');
                         this.open();
@@ -1358,18 +1345,15 @@ class SearchableDropdown {
                     break;
                 case 'ArrowUp':
                     e.preventDefault();
-                    e.stopPropagation();
                     this.highlightPrev();
                     break;
                 case 'Enter':
                     e.preventDefault();
-                    e.stopPropagation();
                     if (this.highlightedIndex >= 0 && this.filteredOptions[this.highlightedIndex]) {
                         this.selectOption(this.filteredOptions[this.highlightedIndex]);
                     }
                     break;
                 case 'Escape':
-                    e.stopPropagation();
                     this.close();
                     this.input.blur();
                     break;
@@ -1379,16 +1363,16 @@ class SearchableDropdown {
             }
         });
 
-        // Click outside to close - use capture phase for reliability
-        document.addEventListener('click', (e) => {
-            if (this.isOpen && !this.wrapper.contains(e.target)) {
+        // Click outside to close
+        document.addEventListener('mousedown', (e) => {
+            if (this.isOpen && !this.wrapper.contains(e.target) && !this.dropdown.contains(e.target)) {
                 this.close();
             }
-        }, true);
+        });
 
-        // Prevent dropdown clicks from bubbling
+        // Prevent dropdown interactions from closing
         this.dropdown.addEventListener('mousedown', (e) => {
-            e.preventDefault(); // Prevent input blur
+            e.preventDefault();
         });
     }
 
@@ -1396,15 +1380,11 @@ class SearchableDropdown {
         const q = query.toLowerCase().trim();
 
         if (!q) {
-            // Show all non-disabled options (limit to 100 for performance)
             this.filteredOptions = this.options.filter(o => !o.disabled && o.value).slice(0, 100);
         } else {
-            // Filter by code or description
             this.filteredOptions = this.options.filter(o => {
                 if (o.disabled || !o.value) return false;
-                const text = o.text.toLowerCase();
-                const title = o.title.toLowerCase();
-                return text.includes(q) || title.includes(q);
+                return o.text.toLowerCase().includes(q) || o.title.toLowerCase().includes(q);
             }).slice(0, 50);
         }
 
@@ -1429,8 +1409,6 @@ class SearchableDropdown {
                 (idx === this.highlightedIndex ? ' highlighted' : '') +
                 (opt.value === this.selectedValue ? ' selected' : '');
             item.setAttribute('role', 'option');
-            item.setAttribute('data-value', opt.value);
-            item.setAttribute('data-idx', idx);
             if (opt.title) item.setAttribute('title', opt.title);
             item.textContent = opt.text;
 
@@ -1455,17 +1433,9 @@ class SearchableDropdown {
             item.classList.toggle('highlighted', idx === this.highlightedIndex);
         });
 
-        // Scroll highlighted item into view without affecting page scroll
+        // Scroll item into view within dropdown only
         if (this.highlightedIndex >= 0 && items[this.highlightedIndex]) {
-            const item = items[this.highlightedIndex];
-            const dropdownRect = this.dropdown.getBoundingClientRect();
-            const itemRect = item.getBoundingClientRect();
-
-            if (itemRect.bottom > dropdownRect.bottom) {
-                this.dropdown.scrollTop += itemRect.bottom - dropdownRect.bottom;
-            } else if (itemRect.top < dropdownRect.top) {
-                this.dropdown.scrollTop -= dropdownRect.top - itemRect.top;
-            }
+            items[this.highlightedIndex].scrollIntoView({ block: 'nearest', behavior: 'auto' });
         }
     }
 
@@ -1488,11 +1458,25 @@ class SearchableDropdown {
         this.input.value = opt.text;
         this.hiddenInput.value = opt.value;
         this.select.value = opt.value;
-
-        // Trigger change event on original select
         this.select.dispatchEvent(new Event('change', { bubbles: true }));
-
         this.close();
+    }
+
+    positionDropdown() {
+        const rect = this.input.getBoundingClientRect();
+        const dropdownHeight = Math.min(this.dropdown.scrollHeight, 240);
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const spaceAbove = rect.top;
+
+        // Position below or above based on available space
+        if (spaceBelow >= dropdownHeight || spaceBelow >= spaceAbove) {
+            this.dropdown.style.top = (rect.bottom + window.scrollY + 2) + 'px';
+        } else {
+            this.dropdown.style.top = (rect.top + window.scrollY - dropdownHeight - 2) + 'px';
+        }
+
+        this.dropdown.style.left = (rect.left + window.scrollX) + 'px';
+        this.dropdown.style.width = rect.width + 'px';
     }
 
     open() {
@@ -1500,12 +1484,13 @@ class SearchableDropdown {
         this.isOpen = true;
         this.dropdown.style.display = 'block';
         this.input.setAttribute('aria-expanded', 'true');
+        this.positionDropdown();
 
-        // Position dropdown correctly
-        requestAnimationFrame(() => {
-            const inputRect = this.input.getBoundingClientRect();
-            this.dropdown.style.width = inputRect.width + 'px';
-        });
+        // Reposition on scroll/resize
+        this.scrollHandler = () => this.positionDropdown();
+        this.resizeHandler = () => this.positionDropdown();
+        window.addEventListener('scroll', this.scrollHandler, true);
+        window.addEventListener('resize', this.resizeHandler);
     }
 
     close() {
@@ -1514,12 +1499,25 @@ class SearchableDropdown {
         this.dropdown.style.display = 'none';
         this.input.setAttribute('aria-expanded', 'false');
 
-        // Restore display value if no selection made
+        // Restore display value
         const selectedOpt = this.options.find(o => o.value === this.selectedValue);
-        if (selectedOpt && selectedOpt.value) {
-            this.input.value = selectedOpt.text;
-        } else {
-            this.input.value = '';
+        this.input.value = selectedOpt && selectedOpt.value ? selectedOpt.text : '';
+
+        // Remove scroll/resize listeners
+        if (this.scrollHandler) {
+            window.removeEventListener('scroll', this.scrollHandler, true);
+            this.scrollHandler = null;
+        }
+        if (this.resizeHandler) {
+            window.removeEventListener('resize', this.resizeHandler);
+            this.resizeHandler = null;
+        }
+    }
+
+    destroy() {
+        this.close();
+        if (this.dropdown.parentNode) {
+            this.dropdown.parentNode.removeChild(this.dropdown);
         }
     }
 }
@@ -1567,30 +1565,37 @@ document.addEventListener('DOMContentLoaded', function() {
 
 /* Searchable Dropdown Styles */
 .searchable-dropdown {
-    position: relative;
-    display: block;
     flex: 1;
-    min-width: 0; /* Allow flex shrinking */
+    min-width: 0;
 }
 
-.searchable-dropdown input {
+.searchable-dropdown-input {
     width: 100%;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.25rem;
+    background: white;
     box-sizing: border-box;
 }
 
-.searchable-dropdown-menu {
+.searchable-dropdown-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+/* Portal dropdown - fixed position relative to viewport */
+.searchable-dropdown-portal {
     position: absolute;
-    top: calc(100% + 2px);
-    left: 0;
     background: white;
     border: 1px solid #d1d5db;
     border-radius: 0.375rem;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
     max-height: 240px;
     overflow-y: auto;
     overflow-x: hidden;
-    z-index: 9999;
-    min-width: 100%;
+    z-index: 99999;
 }
 
 .searchable-dropdown-item {
@@ -1600,7 +1605,7 @@ document.addEventListener('DOMContentLoaded', function() {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    transition: background-color 0.1s ease;
+    background: white;
 }
 
 .searchable-dropdown-item:hover,
