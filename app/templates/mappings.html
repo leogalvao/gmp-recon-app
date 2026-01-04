@@ -1256,14 +1256,25 @@ class SearchableDropdown {
     }
 
     init() {
-        // Create wrapper
-        this.wrapper = document.createElement('div');
-        this.wrapper.className = 'searchable-dropdown relative';
+        // Get computed width before hiding select
+        const selectRect = this.select.getBoundingClientRect();
+        const selectWidth = selectRect.width;
 
-        // Create search input
+        // Create wrapper - use flex-1 to match parent flex layout
+        this.wrapper = document.createElement('div');
+        this.wrapper.className = 'searchable-dropdown';
+        this.wrapper.style.position = 'relative';
+        this.wrapper.style.flex = '1';
+        this.wrapper.style.minWidth = Math.max(selectWidth, 200) + 'px';
+
+        // Create search input - copy classes but remove problematic ones
         this.input = document.createElement('input');
         this.input.type = 'text';
-        this.input.className = this.select.className + ' cursor-pointer';
+        const inputClasses = this.select.className
+            .replace('budget-select', '')
+            .replace('flex-1', '')
+            .replace('min-w-80', '');
+        this.input.className = inputClasses + ' w-full';
         this.input.placeholder = '-- Search budget code --';
         this.input.setAttribute('autocomplete', 'off');
         this.input.setAttribute('aria-label', 'Search budget code');
@@ -1276,10 +1287,11 @@ class SearchableDropdown {
             this.input.value = selectedOpt.text;
         }
 
-        // Create dropdown container
+        // Create dropdown container with fixed positioning to avoid layout shifts
         this.dropdown = document.createElement('div');
-        this.dropdown.className = 'searchable-dropdown-menu absolute z-50 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto hidden';
+        this.dropdown.className = 'searchable-dropdown-menu';
         this.dropdown.setAttribute('role', 'listbox');
+        this.dropdown.style.display = 'none';
 
         // Create hidden input for form submission
         this.hiddenInput = document.createElement('input');
@@ -1304,21 +1316,32 @@ class SearchableDropdown {
         // Bind events
         this.bindEvents();
 
-        // Initial render
-        this.filterOptions('');
+        // Initial render (don't filter yet, wait for open)
+        this.filteredOptions = [];
     }
 
     bindEvents() {
         // Input focus - show dropdown
-        this.input.addEventListener('focus', () => {
+        this.input.addEventListener('focus', (e) => {
+            e.stopPropagation();
             this.input.select();
+            this.filterOptions('');
             this.open();
+        });
+
+        // Input click - ensure dropdown stays open
+        this.input.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!this.isOpen) {
+                this.filterOptions(this.input.value);
+                this.open();
+            }
         });
 
         // Input typing - filter options
         this.input.addEventListener('input', (e) => {
             this.filterOptions(e.target.value);
-            this.open();
+            if (!this.isOpen) this.open();
         });
 
         // Keyboard navigation
@@ -1326,20 +1349,29 @@ class SearchableDropdown {
             switch(e.key) {
                 case 'ArrowDown':
                     e.preventDefault();
+                    e.stopPropagation();
+                    if (!this.isOpen) {
+                        this.filterOptions('');
+                        this.open();
+                    }
                     this.highlightNext();
                     break;
                 case 'ArrowUp':
                     e.preventDefault();
+                    e.stopPropagation();
                     this.highlightPrev();
                     break;
                 case 'Enter':
                     e.preventDefault();
-                    if (this.highlightedIndex >= 0) {
+                    e.stopPropagation();
+                    if (this.highlightedIndex >= 0 && this.filteredOptions[this.highlightedIndex]) {
                         this.selectOption(this.filteredOptions[this.highlightedIndex]);
                     }
                     break;
                 case 'Escape':
+                    e.stopPropagation();
                     this.close();
+                    this.input.blur();
                     break;
                 case 'Tab':
                     this.close();
@@ -1347,11 +1379,16 @@ class SearchableDropdown {
             }
         });
 
-        // Click outside to close
+        // Click outside to close - use capture phase for reliability
         document.addEventListener('click', (e) => {
-            if (!this.wrapper.contains(e.target)) {
+            if (this.isOpen && !this.wrapper.contains(e.target)) {
                 this.close();
             }
+        }, true);
+
+        // Prevent dropdown clicks from bubbling
+        this.dropdown.addEventListener('mousedown', (e) => {
+            e.preventDefault(); // Prevent input blur
         });
     }
 
@@ -1368,7 +1405,7 @@ class SearchableDropdown {
                 const text = o.text.toLowerCase();
                 const title = o.title.toLowerCase();
                 return text.includes(q) || title.includes(q);
-            }).slice(0, 50); // Limit results for performance
+            }).slice(0, 50);
         }
 
         this.highlightedIndex = this.filteredOptions.length > 0 ? 0 : -1;
@@ -1380,7 +1417,7 @@ class SearchableDropdown {
 
         if (this.filteredOptions.length === 0) {
             const noResults = document.createElement('div');
-            noResults.className = 'px-3 py-2 text-gray-500 text-sm';
+            noResults.className = 'searchable-dropdown-empty';
             noResults.textContent = 'No matching budget codes';
             this.dropdown.appendChild(noResults);
             return;
@@ -1388,17 +1425,18 @@ class SearchableDropdown {
 
         this.filteredOptions.forEach((opt, idx) => {
             const item = document.createElement('div');
-            item.className = 'searchable-dropdown-item px-3 py-2 cursor-pointer text-sm hover:bg-blue-50 ' +
-                (idx === this.highlightedIndex ? 'bg-blue-100' : '') +
-                (opt.value === this.selectedValue ? ' font-medium text-blue-700' : '');
+            item.className = 'searchable-dropdown-item' +
+                (idx === this.highlightedIndex ? ' highlighted' : '') +
+                (opt.value === this.selectedValue ? ' selected' : '');
             item.setAttribute('role', 'option');
             item.setAttribute('data-value', opt.value);
-            item.setAttribute('title', opt.title);
-
-            // Highlight matching text
+            item.setAttribute('data-idx', idx);
+            if (opt.title) item.setAttribute('title', opt.title);
             item.textContent = opt.text;
 
-            item.addEventListener('click', () => {
+            item.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 this.selectOption(opt);
             });
 
@@ -1414,12 +1452,20 @@ class SearchableDropdown {
     updateHighlight() {
         const items = this.dropdown.querySelectorAll('.searchable-dropdown-item');
         items.forEach((item, idx) => {
-            item.classList.toggle('bg-blue-100', idx === this.highlightedIndex);
+            item.classList.toggle('highlighted', idx === this.highlightedIndex);
         });
 
-        // Scroll highlighted item into view
+        // Scroll highlighted item into view without affecting page scroll
         if (this.highlightedIndex >= 0 && items[this.highlightedIndex]) {
-            items[this.highlightedIndex].scrollIntoView({ block: 'nearest' });
+            const item = items[this.highlightedIndex];
+            const dropdownRect = this.dropdown.getBoundingClientRect();
+            const itemRect = item.getBoundingClientRect();
+
+            if (itemRect.bottom > dropdownRect.bottom) {
+                this.dropdown.scrollTop += itemRect.bottom - dropdownRect.bottom;
+            } else if (itemRect.top < dropdownRect.top) {
+                this.dropdown.scrollTop -= dropdownRect.top - itemRect.top;
+            }
         }
     }
 
@@ -1452,14 +1498,20 @@ class SearchableDropdown {
     open() {
         if (this.isOpen) return;
         this.isOpen = true;
-        this.dropdown.classList.remove('hidden');
+        this.dropdown.style.display = 'block';
         this.input.setAttribute('aria-expanded', 'true');
+
+        // Position dropdown correctly
+        requestAnimationFrame(() => {
+            const inputRect = this.input.getBoundingClientRect();
+            this.dropdown.style.width = inputRect.width + 'px';
+        });
     }
 
     close() {
         if (!this.isOpen) return;
         this.isOpen = false;
-        this.dropdown.classList.add('hidden');
+        this.dropdown.style.display = 'none';
         this.input.setAttribute('aria-expanded', 'false');
 
         // Restore display value if no selection made
@@ -1516,50 +1568,61 @@ document.addEventListener('DOMContentLoaded', function() {
 /* Searchable Dropdown Styles */
 .searchable-dropdown {
     position: relative;
-    display: inline-block;
+    display: block;
+    flex: 1;
+    min-width: 0; /* Allow flex shrinking */
+}
+
+.searchable-dropdown input {
     width: 100%;
+    box-sizing: border-box;
 }
 
 .searchable-dropdown-menu {
     position: absolute;
-    top: 100%;
+    top: calc(100% + 2px);
     left: 0;
-    right: 0;
-    margin-top: 2px;
     background: white;
     border: 1px solid #d1d5db;
     border-radius: 0.375rem;
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-    max-height: 15rem;
+    max-height: 240px;
     overflow-y: auto;
-    z-index: 50;
+    overflow-x: hidden;
+    z-index: 9999;
+    min-width: 100%;
 }
 
 .searchable-dropdown-item {
-    padding: 0.5rem 0.75rem;
+    padding: 8px 12px;
     cursor: pointer;
     font-size: 0.875rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    transition: background-color 0.1s ease;
 }
 
-.searchable-dropdown-item:hover {
-    background-color: #eff6ff;
-}
-
+.searchable-dropdown-item:hover,
 .searchable-dropdown-item.highlighted {
     background-color: #dbeafe;
 }
 
 .searchable-dropdown-item.selected {
-    font-weight: 500;
+    font-weight: 600;
     color: #1d4ed8;
+    background-color: #eff6ff;
 }
 
-/* Ensure dropdown appears above other elements */
-.searchable-dropdown-menu:not(.hidden) {
-    display: block;
+.searchable-dropdown-item.selected.highlighted {
+    background-color: #dbeafe;
+}
+
+.searchable-dropdown-empty {
+    padding: 12px;
+    color: #6b7280;
+    font-size: 0.875rem;
+    text-align: center;
 }
 </style>
 {% endblock %}
