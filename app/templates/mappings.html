@@ -217,6 +217,24 @@
             </div>
         </div>
 
+        <!-- Score Breakdown Legend -->
+        <div class="flex items-center gap-4 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+            <span class="font-medium text-gray-700">Score breakdown:</span>
+            <span class="flex items-center gap-1">
+                <div class="w-2 h-3 rounded-sm bg-blue-400"></div> Code Match
+            </span>
+            <span class="flex items-center gap-1">
+                <div class="w-2 h-3 rounded-sm bg-purple-400"></div> Type Match
+            </span>
+            <span class="flex items-center gap-1">
+                <div class="w-2 h-3 rounded-sm bg-green-400"></div> Text Similarity
+            </span>
+            <span class="flex items-center gap-1">
+                <div class="w-2 h-3 rounded-sm bg-orange-400"></div> Historical
+            </span>
+            <span class="text-gray-400 ml-2">(darker = higher score)</span>
+        </div>
+
         <!-- Progress Stats -->
         <div class="grid grid-cols-5 gap-4 text-center">
             <div class="bg-blue-50 rounded-lg p-3">
@@ -319,12 +337,28 @@
                         <td class="px-3 py-2">
                             <div class="flex items-center gap-2">
                                 {% if top_sugg %}
-                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium shrink-0
-                                    {% if conf_band == 'high' %}bg-green-100 text-green-800
-                                    {% elif conf_band == 'medium' %}bg-yellow-100 text-yellow-800
-                                    {% else %}bg-gray-100 text-gray-600{% endif %}">
-                                    {{ item.get('confidence', 0)|int }}%
-                                </span>
+                                {% set bd = top_sugg.get('breakdown', {}) %}
+                                <div class="score-breakdown-inline shrink-0 cursor-help"
+                                     title="Code: {{ (bd.get('code_match', 0) * 100)|int }}% | Type: {{ (bd.get('type_match', 0) * 100)|int }}% | Text: {{ (bd.get('text_sim', 0) * 100)|int }}% | History: {{ (bd.get('historical', 0) * 100)|int }}%">
+                                    <div class="flex items-center gap-1">
+                                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold shrink-0
+                                            {% if conf_band == 'high' %}bg-green-100 text-green-800
+                                            {% elif conf_band == 'medium' %}bg-yellow-100 text-yellow-800
+                                            {% else %}bg-gray-100 text-gray-600{% endif %}">
+                                            {{ item.get('confidence', 0)|int }}%
+                                        </span>
+                                        <div class="flex gap-0.5 items-center" title="Score breakdown: Code | Type | Text | History">
+                                            <div class="w-1.5 h-3 rounded-sm {% if bd.get('code_match', 0) >= 0.8 %}bg-blue-500{% elif bd.get('code_match', 0) >= 0.4 %}bg-blue-300{% else %}bg-blue-100{% endif %}"
+                                                 title="Code: {{ (bd.get('code_match', 0) * 100)|int }}%"></div>
+                                            <div class="w-1.5 h-3 rounded-sm {% if bd.get('type_match', 0) >= 0.8 %}bg-purple-500{% elif bd.get('type_match', 0) >= 0.4 %}bg-purple-300{% else %}bg-purple-100{% endif %}"
+                                                 title="Type: {{ (bd.get('type_match', 0) * 100)|int }}%"></div>
+                                            <div class="w-1.5 h-3 rounded-sm {% if bd.get('text_sim', 0) >= 0.8 %}bg-green-500{% elif bd.get('text_sim', 0) >= 0.4 %}bg-green-300{% else %}bg-green-100{% endif %}"
+                                                 title="Text: {{ (bd.get('text_sim', 0) * 100)|int }}%"></div>
+                                            <div class="w-1.5 h-3 rounded-sm {% if bd.get('historical', 0) >= 0.8 %}bg-orange-500{% elif bd.get('historical', 0) >= 0.4 %}bg-orange-300{% else %}bg-orange-100{% endif %}"
+                                                 title="History: {{ (bd.get('historical', 0) * 100)|int }}%"></div>
+                                        </div>
+                                    </div>
+                                </div>
                                 {% else %}
                                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 shrink-0">
                                     Manual
