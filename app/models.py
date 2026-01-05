@@ -220,6 +220,159 @@ class AllocationChangeLog(Base):
     changed_at = Column(DateTime, default=datetime.utcnow)
 
 
+# =============================================================================
+# Forecasting Module Tables (Phase 3)
+# =============================================================================
+
+class ForecastMethod(enum.Enum):
+    """Supported forecasting methods."""
+    EVM = "evm"                  # Earned Value Management
+    PERT = "pert"                # Three-point estimating
+    PARAMETRIC = "parametric"    # Quantity x Unit Rate x Factor
+    ML_LINEAR = "ml_linear"      # Existing LinearRegression model
+    MANUAL = "manual"            # User override
+
+
+class ForecastConfig(Base):
+    """
+    Stores forecasting method selection and parameters per GMP line.
+    Each GMP division can have its own forecasting approach.
+    """
+    __tablename__ = "forecast_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    gmp_division = Column(String(200), unique=True, index=True, nullable=False)
+    method = Column(String(30), default='evm')  # ForecastMethod.value
+
+    # EVM parameters
+    evm_performance_factor = Column(Float, default=1.0)  # CPI adjustment factor
+
+    # PERT parameters (stored as cents)
+    pert_optimistic_cents = Column(Integer, nullable=True)
+    pert_most_likely_cents = Column(Integer, nullable=True)
+    pert_pessimistic_cents = Column(Integer, nullable=True)
+
+    # Parametric parameters
+    param_quantity = Column(Float, nullable=True)
+    param_unit_rate_cents = Column(Integer, nullable=True)
+    param_complexity_factor = Column(Float, default=1.0)
+
+    # Distribution method for remaining cost
+    distribution_method = Column(String(20), default='linear')  # linear, front_loaded, back_loaded
+
+    # Completion date override (null = use project default)
+    completion_date = Column(DateTime, nullable=True)
+
+    # Metadata
+    is_locked = Column(Boolean, default=False)  # Prevent auto-updates
+    notes = Column(Text, nullable=True)
+    created_by = Column(String(100), default="system")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ForecastSnapshot(Base):
+    """
+    Point-in-time forecast snapshot for a GMP division.
+    Stores computed EAC, method used, and confidence metrics.
+    New snapshot created on each recalculation, previous marked superseded.
+    """
+    __tablename__ = "forecast_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    gmp_division = Column(String(200), index=True, nullable=False)
+    snapshot_date = Column(DateTime, default=datetime.utcnow, index=True)
+
+    # Forecast values (in cents)
+    bac_cents = Column(Integer, nullable=False)       # Budget at Completion (GMP amount)
+    ac_cents = Column(Integer, nullable=False)        # Actual Cost to date
+    ev_cents = Column(Integer, nullable=True)         # Earned Value (for EVM, if tracked)
+    eac_cents = Column(Integer, nullable=False)       # Estimate at Completion
+    eac_west_cents = Column(Integer, nullable=False)  # EAC for West region
+    eac_east_cents = Column(Integer, nullable=False)  # EAC for East region
+    etc_cents = Column(Integer, nullable=False)       # Estimate to Complete (EAC - AC)
+    var_cents = Column(Integer, nullable=False)       # Variance (BAC - EAC), negative = over budget
+
+    # Performance indices (for EVM)
+    cpi = Column(Float, nullable=True)   # Cost Performance Index (EV/AC)
+    spi = Column(Float, nullable=True)   # Schedule Performance Index (if available)
+
+    # Method and confidence
+    method = Column(String(30), nullable=False)
+    confidence_score = Column(Float, default=0.5)     # 0.0-1.0
+    confidence_band = Column(String(20), default='medium')  # low, medium, high
+
+    # Method explanation (plain language)
+    explanation = Column(Text, nullable=True)
+
+    # Snapshot lifecycle
+    is_current = Column(Boolean, default=True, index=True)
+    superseded_by_id = Column(Integer, nullable=True)
+    trigger = Column(String(50), default='manual')    # manual, transaction, mapping, schedule
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ForecastPeriod(Base):
+    """
+    Time-bucketed forecast data for a GMP division.
+    Supports weekly (ISO Mon-Sun) and monthly (calendar) granularity.
+    """
+    __tablename__ = "forecast_periods"
+
+    id = Column(Integer, primary_key=True, index=True)
+    snapshot_id = Column(Integer, index=True, nullable=False)  # FK to ForecastSnapshot
+    gmp_division = Column(String(200), index=True, nullable=False)
+
+    # Period identification
+    granularity = Column(String(10), nullable=False)  # 'weekly' or 'monthly'
+    period_start = Column(DateTime, nullable=False, index=True)
+    period_end = Column(DateTime, nullable=False)
+    period_label = Column(String(20), nullable=False)  # e.g., "2026-W01" or "2026-01"
+    period_number = Column(Integer, nullable=False)    # Sequential: 1, 2, 3...
+    iso_week = Column(Integer, nullable=True)          # ISO week number (1-53)
+    iso_year = Column(Integer, nullable=True)          # ISO year
+
+    # Period type relative to as_of_date
+    period_type = Column(String(20), nullable=False)  # 'past', 'current', 'future'
+
+    # Amounts (in cents)
+    actual_cents = Column(Integer, default=0)         # Actual spend in period (past/current)
+    forecast_cents = Column(Integer, default=0)       # Forecasted spend (current/future)
+    blended_cents = Column(Integer, default=0)        # Actual + forecast for current period
+    cumulative_cents = Column(Integer, default=0)     # Running total through this period
+
+    # Regional split
+    actual_west_cents = Column(Integer, default=0)
+    actual_east_cents = Column(Integer, default=0)
+    forecast_west_cents = Column(Integer, default=0)
+    forecast_east_cents = Column(Integer, default=0)
+
+    # For week spanning months (proportional allocation)
+    span_allocation_factor = Column(Float, default=1.0)  # 1.0 = full period, <1.0 = partial
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ForecastAuditLog(Base):
+    """
+    Audit trail for forecast configuration and snapshot changes.
+    Follows pattern of AllocationChangeLog.
+    """
+    __tablename__ = "forecast_audit_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    gmp_division = Column(String(200), index=True, nullable=False)
+    action = Column(String(30), nullable=False)       # method_change, param_update, refresh, lock, unlock
+    field_changed = Column(String(50), nullable=True)
+    old_value = Column(Text, nullable=True)           # JSON
+    new_value = Column(Text, nullable=True)           # JSON
+    previous_eac_cents = Column(Integer, nullable=True)
+    new_eac_cents = Column(Integer, nullable=True)
+    change_reason = Column(String(200), nullable=True)
+    changed_by = Column(String(100), default="system")
+    changed_at = Column(DateTime, default=datetime.utcnow)
+
+
 def init_db():
     """Initialize the database and create all tables."""
     Base.metadata.create_all(bind=engine)

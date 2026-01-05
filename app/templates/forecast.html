@@ -1,0 +1,1004 @@
+{% extends "base.html" %}
+
+{% block title %}Forecast - {{ gmp_division }}{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+    /* Layout */
+    .forecast-layout {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        gap: 1.5rem;
+        align-items: start;
+    }
+
+    @media (max-width: 1200px) {
+        .forecast-layout {
+            grid-template-columns: 1fr;
+        }
+        .forecast-sidebar {
+            order: -1;
+        }
+    }
+
+    /* Metric cards */
+    .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 1rem;
+    }
+
+    .metric-card {
+        background: white;
+        border-radius: 8px;
+        padding: 1rem;
+        border: 1px solid #e5e7eb;
+    }
+
+    .metric-card.highlight {
+        border-color: #3b82f6;
+        background: #eff6ff;
+    }
+
+    .metric-label {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #6b7280;
+        margin-bottom: 0.25rem;
+    }
+
+    .metric-value {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #111827;
+    }
+
+    .metric-value.surplus { color: #16a34a; }
+    .metric-value.overrun { color: #dc2626; }
+    .metric-value.neutral { color: #6b7280; }
+
+    .metric-sub {
+        font-size: 0.75rem;
+        color: #9ca3af;
+        margin-top: 0.25rem;
+    }
+
+    /* Toggle buttons */
+    .toggle-group {
+        display: inline-flex;
+        background: #f3f4f6;
+        border-radius: 8px;
+        padding: 4px;
+    }
+
+    .toggle-btn {
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: #6b7280;
+        cursor: pointer;
+        transition: all 0.2s;
+        border: none;
+        background: transparent;
+    }
+
+    .toggle-btn:hover {
+        color: #374151;
+    }
+
+    .toggle-btn.active {
+        background: white;
+        color: #1d4ed8;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    /* Period table */
+    .period-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+
+    .period-table th {
+        background: #f8fafc;
+        padding: 10px 12px;
+        text-align: left;
+        font-weight: 600;
+        color: #475569;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        border-bottom: 2px solid #e2e8f0;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .period-table th.text-right,
+    .period-table td.text-right {
+        text-align: right;
+    }
+
+    .period-table td {
+        padding: 10px 12px;
+        border-bottom: 1px solid #f1f5f9;
+    }
+
+    .period-table tbody tr:hover {
+        background: #f8fafc;
+    }
+
+    .period-table .period-past {
+        color: #6b7280;
+    }
+
+    .period-table .period-current {
+        background: #fef3c7;
+        font-weight: 500;
+    }
+
+    .period-table .period-future {
+        color: #3b82f6;
+    }
+
+    /* Period type badges */
+    .period-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 9999px;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+
+    .period-badge.past {
+        background: #f3f4f6;
+        color: #6b7280;
+    }
+
+    .period-badge.current {
+        background: #fef3c7;
+        color: #92400e;
+    }
+
+    .period-badge.future {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+
+    /* Chart container */
+    .chart-container {
+        position: relative;
+        height: 280px;
+        margin-top: 1rem;
+    }
+
+    /* Method selector */
+    .method-card {
+        padding: 12px;
+        border: 2px solid #e5e7eb;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .method-card:hover {
+        border-color: #93c5fd;
+        background: #eff6ff;
+    }
+
+    .method-card.selected {
+        border-color: #3b82f6;
+        background: #eff6ff;
+    }
+
+    .method-card.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* Confidence indicator */
+    .confidence-bar {
+        height: 8px;
+        background: #e5e7eb;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .confidence-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.3s;
+    }
+
+    .confidence-fill.high { background: #22c55e; }
+    .confidence-fill.medium { background: #eab308; }
+    .confidence-fill.low { background: #ef4444; }
+
+    /* Explanation box */
+    .explanation-box {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 1rem;
+        font-size: 0.875rem;
+        line-height: 1.6;
+        color: #475569;
+    }
+
+    /* Sidebar */
+    .forecast-sidebar .card {
+        position: sticky;
+        top: 80px;
+    }
+
+    /* Period scroll container */
+    .period-scroll {
+        max-height: 500px;
+        overflow-y: auto;
+    }
+
+    /* Loading state */
+    .loading-overlay {
+        position: absolute;
+        inset: 0;
+        background: rgba(255,255,255,0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+    }
+
+    .spinner {
+        width: 32px;
+        height: 32px;
+        border: 3px solid #e5e7eb;
+        border-top-color: #3b82f6;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    /* Parameter form */
+    .param-group {
+        margin-bottom: 1rem;
+    }
+
+    .param-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.25rem;
+    }
+
+    .param-input {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 0.875rem;
+    }
+
+    .param-input:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="forecast-layout">
+    <!-- Main Content -->
+    <div class="space-y-6">
+        <!-- Header -->
+        <div class="card">
+            <div class="flex flex-wrap justify-between items-start gap-4 mb-6">
+                <div>
+                    <div class="flex items-center gap-3 mb-2">
+                        <a href="/gmp" class="text-gray-400 hover:text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                            </svg>
+                        </a>
+                        <h1 class="text-2xl font-bold text-gray-900">{{ gmp_division }}</h1>
+                        <span class="badge badge-blue">Forecast</span>
+                    </div>
+                    <p class="text-gray-500 text-sm">
+                        {% if forecast.has_forecast %}
+                        Last updated: {{ forecast.snapshot_date[:16] | replace('T', ' ') }}
+                        {% else %}
+                        No forecast computed yet
+                        {% endif %}
+                    </p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <a href="/api/gmp/{{ gmp_division | urlencode }}/forecast/export?format=csv&granularity={{ granularity }}"
+                       class="btn btn-secondary text-sm">
+                        <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
+                        Export
+                    </a>
+                    <button onclick="refreshForecast()" class="btn btn-primary text-sm" id="refreshBtn">
+                        <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+
+            <!-- Key Metrics -->
+            {% if forecast.has_forecast %}
+            <div class="metric-grid">
+                <div class="metric-card highlight">
+                    <div class="metric-label">Budget (BAC)</div>
+                    <div class="metric-value">{{ forecast.bac_display }}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Actual Cost</div>
+                    <div class="metric-value">{{ forecast.ac_display }}</div>
+                    <div class="metric-sub">{{ forecast.percent_complete }}% complete</div>
+                </div>
+                <div class="metric-card highlight">
+                    <div class="metric-label">EAC (Forecast)</div>
+                    <div class="metric-value">{{ forecast.eac_display }}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Remaining (ETC)</div>
+                    <div class="metric-value">{{ forecast.etc_display }}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Variance</div>
+                    <div class="metric-value {% if forecast.var_cents > 0 %}surplus{% elif forecast.var_cents < 0 %}overrun{% else %}neutral{% endif %}">
+                        {{ forecast.var_display }}
+                    </div>
+                    <div class="metric-sub">{{ forecast.var_percent }}% of budget</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">CPI</div>
+                    <div class="metric-value {% if forecast.cpi and forecast.cpi >= 1 %}surplus{% elif forecast.cpi %}overrun{% endif %}">
+                        {{ forecast.cpi if forecast.cpi else 'N/A' }}
+                    </div>
+                    <div class="metric-sub">Cost Performance Index</div>
+                </div>
+            </div>
+            {% else %}
+            <div class="alert alert-info">
+                <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                No forecast has been computed for this division yet. Click "Refresh" to generate a forecast.
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Chart -->
+        {% if forecast.has_forecast %}
+        <div class="card">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold text-gray-900">Forecast Timeline</h2>
+                <div class="toggle-group">
+                    <button class="toggle-btn {% if granularity == 'weekly' %}active{% endif %}"
+                            onclick="switchGranularity('weekly')">Weekly</button>
+                    <button class="toggle-btn {% if granularity == 'monthly' %}active{% endif %}"
+                            onclick="switchGranularity('monthly')">Monthly</button>
+                </div>
+            </div>
+            <div class="chart-container">
+                <canvas id="forecastChart"></canvas>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Period Table -->
+        {% if periods and periods.periods %}
+        <div class="card">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold text-gray-900">
+                    {{ 'Weekly' if granularity == 'weekly' else 'Monthly' }} Breakdown
+                    <span class="text-gray-400 font-normal text-sm ml-2">({{ periods.period_count }} periods)</span>
+                </h2>
+                <div class="flex items-center gap-3 text-sm">
+                    <span class="period-badge past">Past</span>
+                    <span class="period-badge current">Current</span>
+                    <span class="period-badge future">Future</span>
+                </div>
+            </div>
+            <div class="period-scroll border rounded-lg overflow-hidden">
+                <table class="period-table">
+                    <thead>
+                        <tr>
+                            <th>Period</th>
+                            <th>Dates</th>
+                            <th class="text-right">Actual</th>
+                            <th class="text-right">Forecast</th>
+                            <th class="text-right">Blended</th>
+                            <th class="text-right">Cumulative</th>
+                            <th class="text-center" style="width: 80px">Type</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in periods.periods %}
+                        <tr class="period-{{ p.period_type }}">
+                            <td class="font-medium">{{ p.period_label }}</td>
+                            <td class="text-gray-500 text-xs">
+                                {{ p.period_start[:10] }} - {{ p.period_end[:10] }}
+                            </td>
+                            <td class="text-right">
+                                {% if p.period_type in ['past', 'current'] %}
+                                {{ p.actual_display }}
+                                {% else %}
+                                <span class="text-gray-300">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-right">
+                                {% if p.period_type in ['current', 'future'] %}
+                                {{ p.forecast_display }}
+                                {% else %}
+                                <span class="text-gray-300">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-right font-medium">{{ p.blended_display }}</td>
+                            <td class="text-right text-gray-600">{{ p.cumulative_display }}</td>
+                            <td class="text-center">
+                                <span class="period-badge {{ p.period_type }}">{{ p.period_type }}</span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Sidebar -->
+    <div class="forecast-sidebar space-y-4">
+        <!-- Method & Confidence -->
+        <div class="card">
+            <h3 class="font-semibold text-gray-900 mb-4">Forecast Method</h3>
+
+            {% if forecast.has_forecast %}
+            <!-- Current Method -->
+            <div class="mb-4">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-700">{{ config.method | upper }}</span>
+                    <button onclick="openMethodModal()" class="text-blue-600 text-sm hover:underline">Change</button>
+                </div>
+
+                <!-- Confidence -->
+                <div class="mb-2">
+                    <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
+                        <span>Confidence</span>
+                        <span class="font-medium {{ forecast.confidence_band }}">
+                            {{ (forecast.confidence_score * 100) | int }}%
+                        </span>
+                    </div>
+                    <div class="confidence-bar">
+                        <div class="confidence-fill {{ forecast.confidence_band }}"
+                             style="width: {{ (forecast.confidence_score * 100) | int }}%"></div>
+                    </div>
+                </div>
+
+                <span class="inline-block px-2 py-1 text-xs rounded-full
+                    {% if forecast.confidence_band == 'high' %}bg-green-100 text-green-800
+                    {% elif forecast.confidence_band == 'medium' %}bg-yellow-100 text-yellow-800
+                    {% else %}bg-red-100 text-red-800{% endif %}">
+                    {{ forecast.confidence_band | capitalize }} Confidence
+                </span>
+            </div>
+
+            <!-- Explanation -->
+            <div class="explanation-box">
+                <div class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">How It's Calculated</div>
+                {{ forecast.explanation }}
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm">Generate a forecast to see method details.</p>
+            {% endif %}
+        </div>
+
+        <!-- Distribution -->
+        <div class="card">
+            <h3 class="font-semibold text-gray-900 mb-4">Cost Distribution</h3>
+
+            <div class="space-y-3">
+                <div>
+                    <div class="flex justify-between text-sm mb-1">
+                        <span class="text-gray-600">Method</span>
+                        <span class="font-medium">{{ config.distribution_method | default('linear') | capitalize }}</span>
+                    </div>
+                </div>
+
+                {% if forecast.has_forecast %}
+                <div class="pt-3 border-t">
+                    <div class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Regional Split</div>
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-sm">
+                            <span class="text-gray-600">West</span>
+                            <span class="font-medium">${{ "{:,.0f}".format((forecast.eac_west_cents / 100) | int) if forecast.eac_cents else '-' }}</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-gray-600">East</span>
+                            <span class="font-medium">${{ "{:,.0f}".format((forecast.eac_east_cents / 100) | int) if forecast.eac_cents else '-' }}</span>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="pt-3 border-t">
+                    <div class="flex justify-between text-sm mb-1">
+                        <span class="text-gray-600">Completion Date</span>
+                        <span class="font-medium">{{ config.completion_date[:10] if config.completion_date else 'Auto' }}</span>
+                    </div>
+                    <button onclick="openSettingsModal()" class="text-blue-600 text-sm hover:underline">
+                        Edit Settings
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="card">
+            <h3 class="font-semibold text-gray-900 mb-4">Related</h3>
+            <div class="space-y-2">
+                <a href="/api/gmp/{{ gmp_division | urlencode }}/forecast/history"
+                   target="_blank"
+                   class="flex items-center text-sm text-gray-600 hover:text-blue-600">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    View History (JSON)
+                </a>
+                <a href="/api/gmp/{{ gmp_division | urlencode }}/forecast/snapshots"
+                   target="_blank"
+                   class="flex items-center text-sm text-gray-600 hover:text-blue-600">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    Snapshot History (JSON)
+                </a>
+                <a href="/api/gmp/drilldown/{{ gmp_division | urlencode }}"
+                   target="_blank"
+                   class="flex items-center text-sm text-gray-600 hover:text-blue-600">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7c0-2-1-3-3-3H7c-2 0-3 1-3 3z"></path>
+                    </svg>
+                    Cost Drilldown (JSON)
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Method Selection Modal -->
+<div id="methodModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center">
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold">Select Forecasting Method</h3>
+            <button onclick="closeMethodModal()" class="text-gray-400 hover:text-gray-600">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+
+        <div class="space-y-3 mb-6">
+            <div class="method-card {% if config.method == 'evm' %}selected{% endif %}" onclick="selectMethod('evm')">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="font-medium">EVM (Earned Value Management)</div>
+                        <div class="text-sm text-gray-500">CPI-based projection using actual vs budget</div>
+                    </div>
+                    <input type="radio" name="method" value="evm" {% if config.method == 'evm' %}checked{% endif %}>
+                </div>
+            </div>
+
+            <div class="method-card {% if config.method == 'pert' %}selected{% endif %}" onclick="selectMethod('pert')">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="font-medium">PERT (Three-Point Estimate)</div>
+                        <div class="text-sm text-gray-500">Weighted average of O, M, P estimates</div>
+                    </div>
+                    <input type="radio" name="method" value="pert" {% if config.method == 'pert' %}checked{% endif %}>
+                </div>
+            </div>
+
+            <div class="method-card {% if config.method == 'parametric' %}selected{% endif %}" onclick="selectMethod('parametric')">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="font-medium">Parametric</div>
+                        <div class="text-sm text-gray-500">Quantity x Unit Rate x Complexity</div>
+                    </div>
+                    <input type="radio" name="method" value="parametric" {% if config.method == 'parametric' %}checked{% endif %}>
+                </div>
+            </div>
+
+            <div class="method-card {% if config.method == 'manual' %}selected{% endif %}" onclick="selectMethod('manual')">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="font-medium">Manual Override</div>
+                        <div class="text-sm text-gray-500">User-specified EAC value</div>
+                    </div>
+                    <input type="radio" name="method" value="manual" {% if config.method == 'manual' %}checked{% endif %}>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex justify-end gap-3">
+            <button onclick="closeMethodModal()" class="btn btn-secondary">Cancel</button>
+            <button onclick="saveMethod()" class="btn btn-primary">Save & Refresh</button>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Modal -->
+<div id="settingsModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center">
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold">Forecast Settings</h3>
+            <button onclick="closeSettingsModal()" class="text-gray-400 hover:text-gray-600">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+
+        <form id="settingsForm" class="space-y-4">
+            <!-- Distribution Method -->
+            <div class="param-group">
+                <label class="param-label">Distribution Method</label>
+                <select name="distribution_method" class="param-input">
+                    <option value="linear" {% if config.distribution_method == 'linear' %}selected{% endif %}>Linear (Equal)</option>
+                    <option value="front_loaded" {% if config.distribution_method == 'front_loaded' %}selected{% endif %}>Front Loaded</option>
+                    <option value="back_loaded" {% if config.distribution_method == 'back_loaded' %}selected{% endif %}>Back Loaded</option>
+                </select>
+            </div>
+
+            <!-- Completion Date -->
+            <div class="param-group">
+                <label class="param-label">Completion Date</label>
+                <input type="date" name="completion_date" class="param-input"
+                       value="{{ config.completion_date[:10] if config.completion_date else '' }}">
+                <div class="text-xs text-gray-500 mt-1">Leave blank for auto-calculated</div>
+            </div>
+
+            <!-- EVM Performance Factor -->
+            <div class="param-group" id="evmParams">
+                <label class="param-label">Performance Factor (CPI Adjustment)</label>
+                <input type="number" name="evm_performance_factor" class="param-input"
+                       value="{{ config.evm_performance_factor | default(1.0) }}"
+                       step="0.01" min="0.5" max="2.0">
+                <div class="text-xs text-gray-500 mt-1">1.0 = at budget rate, &lt;1.0 = over budget</div>
+            </div>
+
+            <!-- PERT Parameters -->
+            <div id="pertParams" class="{% if config.method != 'pert' %}hidden{% endif %}">
+                <div class="param-label mb-2">PERT Estimates</div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="text-xs text-gray-500">Optimistic ($)</label>
+                        <input type="number" name="pert_optimistic" class="param-input"
+                               value="{{ (config.pert_optimistic_cents / 100) | int if config.pert_optimistic_cents else '' }}"
+                               placeholder="Best case">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">Most Likely ($)</label>
+                        <input type="number" name="pert_most_likely" class="param-input"
+                               value="{{ (config.pert_most_likely_cents / 100) | int if config.pert_most_likely_cents else '' }}"
+                               placeholder="Expected">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">Pessimistic ($)</label>
+                        <input type="number" name="pert_pessimistic" class="param-input"
+                               value="{{ (config.pert_pessimistic_cents / 100) | int if config.pert_pessimistic_cents else '' }}"
+                               placeholder="Worst case">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Parametric Parameters -->
+            <div id="parametricParams" class="{% if config.method != 'parametric' %}hidden{% endif %}">
+                <div class="param-label mb-2">Parametric Inputs</div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-xs text-gray-500">Quantity</label>
+                        <input type="number" name="param_quantity" class="param-input"
+                               value="{{ config.param_quantity if config.param_quantity else '' }}"
+                               placeholder="Units">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">Unit Rate ($)</label>
+                        <input type="number" name="param_unit_rate" class="param-input"
+                               value="{{ (config.param_unit_rate_cents / 100) if config.param_unit_rate_cents else '' }}"
+                               step="0.01" placeholder="$/unit">
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <label class="text-xs text-gray-500">Complexity Factor</label>
+                    <select name="param_complexity_factor" class="param-input">
+                        <option value="0.9" {% if config.param_complexity_factor == 0.9 %}selected{% endif %}>Low (0.9)</option>
+                        <option value="1.0" {% if config.param_complexity_factor == 1.0 or not config.param_complexity_factor %}selected{% endif %}>Normal (1.0)</option>
+                        <option value="1.15" {% if config.param_complexity_factor == 1.15 %}selected{% endif %}>High (1.15)</option>
+                        <option value="1.3" {% if config.param_complexity_factor == 1.3 %}selected{% endif %}>Very High (1.3)</option>
+                    </select>
+                </div>
+            </div>
+        </form>
+
+        <div class="flex justify-end gap-3 mt-6">
+            <button onclick="closeSettingsModal()" class="btn btn-secondary">Cancel</button>
+            <button onclick="saveSettings()" class="btn btn-primary">Save & Refresh</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const gmpDivision = "{{ gmp_division }}";
+let currentGranularity = "{{ granularity }}";
+let selectedMethod = "{{ config.method }}";
+
+// Chart initialization
+{% if forecast.has_forecast and periods and periods.periods %}
+const ctx = document.getElementById('forecastChart').getContext('2d');
+const chartData = {
+    labels: [{% for p in periods.periods %}"{{ p.period_label }}"{% if not loop.last %},{% endif %}{% endfor %}],
+    datasets: [
+        {
+            label: 'Actual',
+            data: [{% for p in periods.periods %}{{ p.actual_cents / 100 }}{% if not loop.last %},{% endif %}{% endfor %}],
+            borderColor: '#6b7280',
+            backgroundColor: 'rgba(107, 114, 128, 0.1)',
+            fill: true,
+            tension: 0.3
+        },
+        {
+            label: 'Forecast',
+            data: [{% for p in periods.periods %}{{ p.forecast_cents / 100 }}{% if not loop.last %},{% endif %}{% endfor %}],
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            borderDash: [5, 5],
+            fill: true,
+            tension: 0.3
+        },
+        {
+            label: 'Cumulative',
+            data: [{% for p in periods.periods %}{{ p.cumulative_cents / 100 }}{% if not loop.last %},{% endif %}{% endfor %}],
+            borderColor: '#10b981',
+            backgroundColor: 'transparent',
+            fill: false,
+            tension: 0.3,
+            yAxisID: 'y1'
+        }
+    ]
+};
+
+const forecastChart = new Chart(ctx, {
+    type: 'line',
+    data: chartData,
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+            intersect: false,
+            mode: 'index'
+        },
+        plugins: {
+            legend: {
+                position: 'top',
+                labels: {
+                    usePointStyle: true,
+                    padding: 20
+                }
+            },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        return context.dataset.label + ': $' + context.raw.toLocaleString();
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                grid: {
+                    display: false
+                }
+            },
+            y: {
+                position: 'left',
+                title: {
+                    display: true,
+                    text: 'Period Amount ($)'
+                },
+                ticks: {
+                    callback: function(value) {
+                        return '$' + value.toLocaleString();
+                    }
+                }
+            },
+            y1: {
+                position: 'right',
+                title: {
+                    display: true,
+                    text: 'Cumulative ($)'
+                },
+                grid: {
+                    drawOnChartArea: false
+                },
+                ticks: {
+                    callback: function(value) {
+                        return '$' + value.toLocaleString();
+                    }
+                }
+            }
+        }
+    }
+});
+{% endif %}
+
+// Switch granularity
+function switchGranularity(granularity) {
+    window.location.href = `/gmp/${encodeURIComponent(gmpDivision)}/forecast?granularity=${granularity}`;
+}
+
+// Refresh forecast
+async function refreshForecast() {
+    const btn = document.getElementById('refreshBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<svg class="w-4 h-4 inline mr-1 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Refreshing...';
+
+    try {
+        const response = await fetch(`/api/gmp/${encodeURIComponent(gmpDivision)}/forecast/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (response.ok) {
+            window.location.reload();
+        } else {
+            alert('Failed to refresh forecast');
+            btn.disabled = false;
+            btn.innerHTML = '<svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Refresh';
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+        btn.disabled = false;
+        btn.innerHTML = '<svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Refresh';
+    }
+}
+
+// Method modal
+function openMethodModal() {
+    document.getElementById('methodModal').classList.remove('hidden');
+    document.getElementById('methodModal').classList.add('flex');
+}
+
+function closeMethodModal() {
+    document.getElementById('methodModal').classList.add('hidden');
+    document.getElementById('methodModal').classList.remove('flex');
+}
+
+function selectMethod(method) {
+    selectedMethod = method;
+    document.querySelectorAll('.method-card').forEach(card => {
+        card.classList.remove('selected');
+    });
+    event.currentTarget.classList.add('selected');
+    document.querySelector(`input[value="${method}"]`).checked = true;
+}
+
+async function saveMethod() {
+    try {
+        const response = await fetch(`/api/gmp/${encodeURIComponent(gmpDivision)}/forecast/method`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ method: selectedMethod })
+        });
+
+        if (response.ok) {
+            closeMethodModal();
+            await refreshForecast();
+        } else {
+            alert('Failed to update method');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Settings modal
+function openSettingsModal() {
+    document.getElementById('settingsModal').classList.remove('hidden');
+    document.getElementById('settingsModal').classList.add('flex');
+}
+
+function closeSettingsModal() {
+    document.getElementById('settingsModal').classList.add('hidden');
+    document.getElementById('settingsModal').classList.remove('flex');
+}
+
+async function saveSettings() {
+    const form = document.getElementById('settingsForm');
+    const formData = new FormData(form);
+    const params = {};
+
+    // Distribution method
+    params.distribution_method = formData.get('distribution_method');
+
+    // Completion date
+    const completionDate = formData.get('completion_date');
+    if (completionDate) {
+        params.completion_date = completionDate;
+    }
+
+    // EVM
+    const perfFactor = parseFloat(formData.get('evm_performance_factor'));
+    if (!isNaN(perfFactor)) {
+        params.evm_performance_factor = perfFactor;
+    }
+
+    // PERT (convert to cents)
+    const pertO = parseFloat(formData.get('pert_optimistic'));
+    const pertM = parseFloat(formData.get('pert_most_likely'));
+    const pertP = parseFloat(formData.get('pert_pessimistic'));
+    if (!isNaN(pertO)) params.pert_optimistic_cents = Math.round(pertO * 100);
+    if (!isNaN(pertM)) params.pert_most_likely_cents = Math.round(pertM * 100);
+    if (!isNaN(pertP)) params.pert_pessimistic_cents = Math.round(pertP * 100);
+
+    // Parametric
+    const qty = parseFloat(formData.get('param_quantity'));
+    const rate = parseFloat(formData.get('param_unit_rate'));
+    const complexity = parseFloat(formData.get('param_complexity_factor'));
+    if (!isNaN(qty)) params.param_quantity = qty;
+    if (!isNaN(rate)) params.param_unit_rate_cents = Math.round(rate * 100);
+    if (!isNaN(complexity)) params.param_complexity_factor = complexity;
+
+    try {
+        const response = await fetch(`/api/gmp/${encodeURIComponent(gmpDivision)}/forecast/params`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params)
+        });
+
+        if (response.ok) {
+            closeSettingsModal();
+            await refreshForecast();
+        } else {
+            alert('Failed to update settings');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Close modals on escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeMethodModal();
+        closeSettingsModal();
+    }
+});
+
+// Close modals on backdrop click
+document.getElementById('methodModal').addEventListener('click', function(e) {
+    if (e.target === this) closeMethodModal();
+});
+document.getElementById('settingsModal').addEventListener('click', function(e) {
+    if (e.target === this) closeSettingsModal();
+});
+</script>
+{% endblock %}

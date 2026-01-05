@@ -46,6 +46,11 @@ from app.modules.suggestion_engine import (
     normalize_vendor, _get_thresholds
 )
 from app.config import get_config
+from app.modules.forecasting import (
+    ForecastManager, compute_project_rollup,
+    calculate_evm, calculate_pert, calculate_parametric
+)
+from app.models import ForecastConfig, ForecastSnapshot, ForecastPeriod, ForecastAuditLog
 
 
 # Initialize FastAPI app
@@ -262,6 +267,118 @@ async def gmp_page(request: Request, db: Session = Depends(get_db)):
             "error": str(e),
             "active_page": "gmp"
         })
+
+
+@app.get("/gmp/{gmp_division}/forecast", response_class=HTMLResponse)
+async def forecast_page(
+    request: Request,
+    gmp_division: str,
+    granularity: str = "weekly",
+    db: Session = Depends(get_db)
+):
+    """Forecast page for a specific GMP division."""
+    from urllib.parse import unquote
+
+    gmp_division = unquote(gmp_division)
+
+    # Validate granularity
+    if granularity not in ['weekly', 'monthly']:
+        granularity = 'weekly'
+
+    # Get forecast data
+    manager = ForecastManager(db)
+    config = manager.get_or_create_config(gmp_division)
+    snapshot = manager.get_current_snapshot(gmp_division)
+
+    # Build forecast dict
+    if snapshot:
+        forecast = {
+            'has_forecast': True,
+            'snapshot_id': snapshot.id,
+            'snapshot_date': snapshot.snapshot_date.isoformat() if snapshot.snapshot_date else None,
+            'bac_cents': snapshot.bac_cents,
+            'bac_display': cents_to_display(snapshot.bac_cents),
+            'ac_cents': snapshot.ac_cents,
+            'ac_display': cents_to_display(snapshot.ac_cents),
+            'ev_cents': snapshot.ev_cents,
+            'eac_cents': snapshot.eac_cents,
+            'eac_display': cents_to_display(snapshot.eac_cents),
+            'eac_west_cents': snapshot.eac_west_cents,
+            'eac_east_cents': snapshot.eac_east_cents,
+            'etc_cents': snapshot.etc_cents,
+            'etc_display': cents_to_display(snapshot.etc_cents),
+            'var_cents': snapshot.var_cents,
+            'var_display': cents_to_display(snapshot.var_cents),
+            'var_percent': round(snapshot.var_cents / snapshot.bac_cents * 100, 1) if snapshot.bac_cents else 0,
+            'percent_complete': round(snapshot.ac_cents / snapshot.eac_cents * 100, 1) if snapshot.eac_cents else 0,
+            'cpi': snapshot.cpi,
+            'spi': snapshot.spi,
+            'method': snapshot.method,
+            'confidence_score': snapshot.confidence_score,
+            'confidence_band': snapshot.confidence_band,
+            'explanation': snapshot.explanation,
+            'trigger': snapshot.trigger
+        }
+    else:
+        forecast = {'has_forecast': False}
+
+    # Build config dict
+    config_dict = {
+        'method': config.method,
+        'evm_performance_factor': config.evm_performance_factor,
+        'pert_optimistic_cents': config.pert_optimistic_cents,
+        'pert_most_likely_cents': config.pert_most_likely_cents,
+        'pert_pessimistic_cents': config.pert_pessimistic_cents,
+        'param_quantity': config.param_quantity,
+        'param_unit_rate_cents': config.param_unit_rate_cents,
+        'param_complexity_factor': config.param_complexity_factor,
+        'distribution_method': config.distribution_method,
+        'completion_date': config.completion_date.isoformat() if config.completion_date else None,
+        'is_locked': config.is_locked
+    }
+
+    # Get periods
+    periods_data = {'periods': [], 'period_count': 0}
+    if snapshot:
+        periods = manager.get_periods(gmp_division, granularity)
+        if periods:
+            periods_data = {
+                'period_count': len(periods),
+                'periods': [
+                    {
+                        'period_label': p.period_label,
+                        'period_number': p.period_number,
+                        'period_start': p.period_start.isoformat() if p.period_start else None,
+                        'period_end': p.period_end.isoformat() if p.period_end else None,
+                        'period_type': p.period_type,
+                        'iso_week': p.iso_week,
+                        'iso_year': p.iso_year,
+                        'actual_cents': p.actual_cents,
+                        'actual_display': cents_to_display(p.actual_cents),
+                        'forecast_cents': p.forecast_cents,
+                        'forecast_display': cents_to_display(p.forecast_cents),
+                        'blended_cents': p.blended_cents,
+                        'blended_display': cents_to_display(p.blended_cents),
+                        'cumulative_cents': p.cumulative_cents,
+                        'cumulative_display': cents_to_display(p.cumulative_cents),
+                        'actual_west_cents': p.actual_west_cents,
+                        'actual_east_cents': p.actual_east_cents,
+                        'forecast_west_cents': p.forecast_west_cents,
+                        'forecast_east_cents': p.forecast_east_cents
+                    }
+                    for p in periods
+                ]
+            }
+
+    return templates.TemplateResponse("forecast.html", {
+        "request": request,
+        "gmp_division": gmp_division,
+        "granularity": granularity,
+        "forecast": forecast,
+        "config": config_dict,
+        "periods": periods_data,
+        "active_page": "gmp"
+    })
 
 
 @app.get("/mappings", response_class=HTMLResponse)
@@ -1150,6 +1267,541 @@ async def get_allocation_history(gmp_division: str, db: Session = Depends(get_db
             }
             for log in logs
         ]
+    }
+
+
+# ------------ Forecasting API Endpoints ------------
+
+@app.get("/api/gmp/{gmp_division}/forecast")
+async def get_gmp_forecast(gmp_division: str, db: Session = Depends(get_db)):
+    """
+    Get current forecast summary for a GMP division.
+    Returns EAC, method, confidence, and key metrics.
+    """
+    manager = ForecastManager(db)
+    snapshot = manager.get_current_snapshot(gmp_division)
+
+    if not snapshot:
+        # No forecast exists yet - return empty structure
+        return {
+            'gmp_division': gmp_division,
+            'has_forecast': False,
+            'message': 'No forecast computed yet. Trigger a refresh to generate forecast.'
+        }
+
+    config = manager.get_or_create_config(gmp_division)
+
+    return {
+        'gmp_division': gmp_division,
+        'has_forecast': True,
+        'snapshot_id': snapshot.id,
+        'snapshot_date': snapshot.snapshot_date.isoformat(),
+        'bac_cents': snapshot.bac_cents,
+        'bac_display': cents_to_display(snapshot.bac_cents),
+        'ac_cents': snapshot.ac_cents,
+        'ac_display': cents_to_display(snapshot.ac_cents),
+        'ev_cents': snapshot.ev_cents,
+        'eac_cents': snapshot.eac_cents,
+        'eac_display': cents_to_display(snapshot.eac_cents),
+        'eac_west_cents': snapshot.eac_west_cents,
+        'eac_east_cents': snapshot.eac_east_cents,
+        'etc_cents': snapshot.etc_cents,
+        'etc_display': cents_to_display(snapshot.etc_cents),
+        'var_cents': snapshot.var_cents,
+        'var_display': cents_to_display(snapshot.var_cents),
+        'var_percent': round(snapshot.var_cents / snapshot.bac_cents * 100, 1) if snapshot.bac_cents else 0,
+        'percent_complete': round(snapshot.ac_cents / snapshot.eac_cents * 100, 1) if snapshot.eac_cents else 0,
+        'cpi': snapshot.cpi,
+        'spi': snapshot.spi,
+        'method': snapshot.method,
+        'confidence_score': snapshot.confidence_score,
+        'confidence_band': snapshot.confidence_band,
+        'explanation': snapshot.explanation,
+        'trigger': snapshot.trigger,
+        'is_locked': config.is_locked,
+        'distribution_method': config.distribution_method,
+        'completion_date': config.completion_date.isoformat() if config.completion_date else None
+    }
+
+
+@app.get("/api/gmp/{gmp_division}/forecast/periods")
+async def get_gmp_forecast_periods(
+    gmp_division: str,
+    granularity: str = "weekly",
+    db: Session = Depends(get_db)
+):
+    """
+    Get time-bucketed forecast periods for a GMP division.
+    Supports weekly and monthly granularity.
+    """
+    if granularity not in ['weekly', 'monthly']:
+        raise HTTPException(status_code=400, detail="Granularity must be 'weekly' or 'monthly'")
+
+    manager = ForecastManager(db)
+    periods = manager.get_periods(gmp_division, granularity)
+
+    if not periods:
+        return {
+            'gmp_division': gmp_division,
+            'granularity': granularity,
+            'periods': [],
+            'message': 'No periods available. Compute forecast first.'
+        }
+
+    return {
+        'gmp_division': gmp_division,
+        'granularity': granularity,
+        'period_count': len(periods),
+        'periods': [
+            {
+                'period_label': p.period_label,
+                'period_number': p.period_number,
+                'period_start': p.period_start.isoformat(),
+                'period_end': p.period_end.isoformat(),
+                'period_type': p.period_type,
+                'iso_week': p.iso_week,
+                'iso_year': p.iso_year,
+                'actual_cents': p.actual_cents,
+                'actual_display': cents_to_display(p.actual_cents),
+                'forecast_cents': p.forecast_cents,
+                'forecast_display': cents_to_display(p.forecast_cents),
+                'blended_cents': p.blended_cents,
+                'blended_display': cents_to_display(p.blended_cents),
+                'cumulative_cents': p.cumulative_cents,
+                'cumulative_display': cents_to_display(p.cumulative_cents),
+                'actual_west_cents': p.actual_west_cents,
+                'actual_east_cents': p.actual_east_cents,
+                'forecast_west_cents': p.forecast_west_cents,
+                'forecast_east_cents': p.forecast_east_cents
+            }
+            for p in periods
+        ]
+    }
+
+
+@app.put("/api/gmp/{gmp_division}/forecast/method")
+async def update_forecast_method(
+    gmp_division: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Update the forecasting method for a GMP division.
+    Body: { "method": "evm|pert|parametric|ml_linear|manual" }
+    """
+    body = await request.json()
+    method = body.get('method')
+
+    valid_methods = ['evm', 'pert', 'parametric', 'ml_linear', 'manual']
+    if method not in valid_methods:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid method. Must be one of: {valid_methods}"
+        )
+
+    manager = ForecastManager(db)
+    config = manager.update_method(gmp_division, method, changed_by='user')
+
+    return {
+        'gmp_division': gmp_division,
+        'method': config.method,
+        'updated_at': config.updated_at.isoformat() if config.updated_at else None,
+        'message': f'Method updated to {method}. Refresh forecast to apply.'
+    }
+
+
+@app.put("/api/gmp/{gmp_division}/forecast/params")
+async def update_forecast_params(
+    gmp_division: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Update method-specific parameters for a GMP division.
+
+    EVM params: { "evm_performance_factor": 1.0 }
+    PERT params: { "pert_optimistic_cents": X, "pert_most_likely_cents": Y, "pert_pessimistic_cents": Z }
+    Parametric: { "param_quantity": N, "param_unit_rate_cents": X, "param_complexity_factor": 1.0 }
+    General: { "distribution_method": "linear|front_loaded|back_loaded", "completion_date": "2026-06-30" }
+    """
+    body = await request.json()
+
+    # Validate and convert date if present
+    if 'completion_date' in body and body['completion_date']:
+        try:
+            body['completion_date'] = datetime.fromisoformat(body['completion_date'])
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use ISO format (YYYY-MM-DD)")
+
+    # Whitelist of allowed parameters
+    allowed_params = {
+        'evm_performance_factor', 'pert_optimistic_cents', 'pert_most_likely_cents',
+        'pert_pessimistic_cents', 'param_quantity', 'param_unit_rate_cents',
+        'param_complexity_factor', 'distribution_method', 'completion_date',
+        'is_locked', 'notes'
+    }
+
+    params = {k: v for k, v in body.items() if k in allowed_params}
+
+    if not params:
+        raise HTTPException(status_code=400, detail="No valid parameters provided")
+
+    manager = ForecastManager(db)
+    config = manager.update_params(gmp_division, params, changed_by='user')
+
+    return {
+        'gmp_division': gmp_division,
+        'updated_params': list(params.keys()),
+        'updated_at': config.updated_at.isoformat() if config.updated_at else None,
+        'message': 'Parameters updated. Refresh forecast to apply.'
+    }
+
+
+@app.post("/api/gmp/{gmp_division}/forecast/refresh")
+async def refresh_forecast(
+    gmp_division: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Force recalculation of forecast for a GMP division.
+    Creates new snapshot, marks previous as superseded.
+
+    Optional body:
+    {
+        "trigger": "manual|transaction|mapping|schedule",
+        "ev_cents": 123456,  // Optional: provide EV if tracked externally
+        "spi": 1.0           // Optional: Schedule Performance Index
+    }
+    """
+    # Get optional body params
+    body = {}
+    try:
+        body = await request.json()
+    except:
+        pass
+
+    trigger = body.get('trigger', 'manual')
+    ev_cents = body.get('ev_cents')
+    spi = body.get('spi')
+
+    # Load current data
+    loader = get_data_loader()
+    gmp_df = loader.gmp
+    budget_df = loader.budget
+    direct_costs_df = loader.direct_costs
+    settings = get_settings(db)
+
+    # Find this GMP division's data
+    gmp_row = gmp_df[gmp_df['GMP'] == gmp_division]
+    if gmp_row.empty:
+        raise HTTPException(status_code=404, detail=f"GMP division '{gmp_division}' not found")
+
+    bac_cents = int(gmp_row['amount_total_cents'].iloc[0])
+
+    # Map and aggregate to get actuals
+    mapped_budget = map_budget_to_gmp(budget_df.copy(), gmp_df)
+    mapped_direct = map_direct_to_budget(direct_costs_df.copy(), budget_df)
+
+    # Aggregate actuals for this division
+    division_budget = mapped_budget[mapped_budget['gmp_division'] == gmp_division]
+    division_budget_codes = set(division_budget['Budget Code'].unique())
+
+    division_direct = mapped_direct[mapped_direct['mapped_budget_code'].isin(division_budget_codes)]
+    ac_cents = int(division_direct['amount_cents'].sum()) if not division_direct.empty else 0
+
+    # Calculate west ratio from allocations
+    if 'amount_west_cents' in division_direct.columns and not division_direct.empty:
+        total_west = division_direct['amount_west_cents'].sum()
+        total = division_direct['amount_cents'].sum()
+        west_ratio = total_west / total if total > 0 else 0.5
+    else:
+        west_ratio = 0.5
+
+    # Compute forecast
+    manager = ForecastManager(db)
+    snapshot = manager.compute_forecast(
+        gmp_division=gmp_division,
+        bac_cents=bac_cents,
+        ac_cents=ac_cents,
+        west_ratio=west_ratio,
+        ev_cents=ev_cents,
+        spi=spi,
+        trigger=trigger
+    )
+
+    # Generate time periods (both weekly and monthly)
+    as_of_date = settings.get('as_of_date') or loader.max_transaction_date or datetime.utcnow()
+    if isinstance(as_of_date, str):
+        as_of_date = pd.to_datetime(as_of_date)
+    if hasattr(as_of_date, 'to_pydatetime'):
+        as_of_date = as_of_date.to_pydatetime()
+
+    if not division_direct.empty and 'Date' in division_direct.columns:
+        start_date = pd.to_datetime(division_direct['Date'].min())
+        if hasattr(start_date, 'to_pydatetime'):
+            start_date = start_date.to_pydatetime()
+    else:
+        start_date = datetime(2025, 1, 1)
+
+    config = manager.get_or_create_config(gmp_division)
+    if config.completion_date:
+        end_date = config.completion_date
+    else:
+        end_date = (pd.Timestamp(as_of_date) + pd.DateOffset(months=6)).to_pydatetime()
+
+    # Generate periods for both granularities
+    manager.generate_periods(
+        snapshot=snapshot,
+        granularity='weekly',
+        start_date=start_date,
+        end_date=end_date,
+        as_of_date=as_of_date,
+        transactions_df=division_direct
+    )
+    manager.generate_periods(
+        snapshot=snapshot,
+        granularity='monthly',
+        start_date=start_date,
+        end_date=end_date,
+        as_of_date=as_of_date,
+        transactions_df=division_direct
+    )
+
+    return {
+        'gmp_division': gmp_division,
+        'snapshot_id': snapshot.id,
+        'bac_cents': snapshot.bac_cents,
+        'bac_display': cents_to_display(snapshot.bac_cents),
+        'ac_cents': snapshot.ac_cents,
+        'ac_display': cents_to_display(snapshot.ac_cents),
+        'eac_cents': snapshot.eac_cents,
+        'eac_display': cents_to_display(snapshot.eac_cents),
+        'var_cents': snapshot.var_cents,
+        'var_display': cents_to_display(snapshot.var_cents),
+        'method': snapshot.method,
+        'confidence_band': snapshot.confidence_band,
+        'explanation': snapshot.explanation,
+        'message': 'Forecast refreshed successfully'
+    }
+
+
+@app.get("/api/gmp/{gmp_division}/forecast/history")
+async def get_forecast_history(
+    gmp_division: str,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """
+    Get forecast change history (audit log) for a GMP division.
+    """
+    if limit > 200:
+        limit = 200
+
+    manager = ForecastManager(db)
+    logs = manager.get_history(gmp_division, limit)
+
+    return {
+        'gmp_division': gmp_division,
+        'history': [
+            {
+                'action': log.action,
+                'field': log.field_changed,
+                'old_value': log.old_value,
+                'new_value': log.new_value,
+                'previous_eac_cents': log.previous_eac_cents,
+                'previous_eac_display': cents_to_display(log.previous_eac_cents) if log.previous_eac_cents else None,
+                'new_eac_cents': log.new_eac_cents,
+                'new_eac_display': cents_to_display(log.new_eac_cents) if log.new_eac_cents else None,
+                'reason': log.change_reason,
+                'changed_by': log.changed_by,
+                'changed_at': log.changed_at.isoformat() if log.changed_at else None
+            }
+            for log in logs
+        ]
+    }
+
+
+@app.get("/api/gmp/{gmp_division}/forecast/snapshots")
+async def get_forecast_snapshots(
+    gmp_division: str,
+    limit: int = 20,
+    db: Session = Depends(get_db)
+):
+    """
+    Get historical forecast snapshots for trend analysis.
+    """
+    if limit > 100:
+        limit = 100
+
+    manager = ForecastManager(db)
+    snapshots = manager.get_snapshot_history(gmp_division, limit)
+
+    return {
+        'gmp_division': gmp_division,
+        'snapshots': [
+            {
+                'snapshot_id': s.id,
+                'snapshot_date': s.snapshot_date.isoformat(),
+                'bac_cents': s.bac_cents,
+                'ac_cents': s.ac_cents,
+                'eac_cents': s.eac_cents,
+                'var_cents': s.var_cents,
+                'cpi': s.cpi,
+                'method': s.method,
+                'confidence_band': s.confidence_band,
+                'is_current': s.is_current,
+                'trigger': s.trigger
+            }
+            for s in snapshots
+        ]
+    }
+
+
+@app.get("/api/gmp/{gmp_division}/forecast/export")
+async def export_forecast(
+    gmp_division: str,
+    format: str = "csv",
+    granularity: str = "weekly",
+    db: Session = Depends(get_db)
+):
+    """
+    Export forecast data for a GMP division.
+    Supports CSV and XLSX formats.
+    """
+    if format not in ['csv', 'xlsx']:
+        raise HTTPException(status_code=400, detail="Format must be 'csv' or 'xlsx'")
+    if granularity not in ['weekly', 'monthly']:
+        raise HTTPException(status_code=400, detail="Granularity must be 'weekly' or 'monthly'")
+
+    manager = ForecastManager(db)
+    snapshot = manager.get_current_snapshot(gmp_division)
+    periods = manager.get_periods(gmp_division, granularity)
+
+    if not snapshot or not periods:
+        raise HTTPException(status_code=404, detail="No forecast data available")
+
+    # Build DataFrame
+    data = []
+    for p in periods:
+        data.append({
+            'Period': p.period_label,
+            'Start Date': p.period_start.strftime('%Y-%m-%d'),
+            'End Date': p.period_end.strftime('%Y-%m-%d'),
+            'Type': p.period_type.capitalize(),
+            'Actual': p.actual_cents / 100,
+            'Forecast': p.forecast_cents / 100,
+            'Blended': p.blended_cents / 100,
+            'Cumulative': p.cumulative_cents / 100,
+            'Actual West': p.actual_west_cents / 100,
+            'Actual East': p.actual_east_cents / 100,
+            'Forecast West': p.forecast_west_cents / 100,
+            'Forecast East': p.forecast_east_cents / 100
+        })
+
+    df = pd.DataFrame(data)
+
+    # Export
+    output = io.BytesIO()
+    if format == 'csv':
+        df.to_csv(output, index=False)
+        media_type = 'text/csv'
+        filename = f"{gmp_division}_forecast_{granularity}.csv"
+    else:
+        df.to_excel(output, index=False, sheet_name='Forecast')
+        media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        filename = f"{gmp_division}_forecast_{granularity}.xlsx"
+
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type=media_type,
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
+
+
+@app.get("/api/project/forecast/rollup")
+async def get_project_forecast_rollup(db: Session = Depends(get_db)):
+    """
+    Get project-level aggregated forecast across all GMP divisions.
+    """
+    rollup = compute_project_rollup(db)
+
+    # Add display formatting
+    rollup['total_bac_display'] = cents_to_display(rollup['total_bac_cents'])
+    rollup['total_ac_display'] = cents_to_display(rollup['total_ac_cents'])
+    rollup['total_eac_display'] = cents_to_display(rollup['total_eac_cents'])
+    rollup['total_etc_display'] = cents_to_display(rollup['total_etc_cents'])
+    rollup['total_var_display'] = cents_to_display(rollup['total_var_cents'])
+
+    # Add display formatting to each division
+    for div in rollup['by_division']:
+        div['bac_display'] = cents_to_display(div['bac_cents'])
+        div['ac_display'] = cents_to_display(div['ac_cents'])
+        div['eac_display'] = cents_to_display(div['eac_cents'])
+        div['etc_display'] = cents_to_display(div['etc_cents'])
+        div['var_display'] = cents_to_display(div['var_cents'])
+
+    return rollup
+
+
+@app.post("/api/project/forecast/refresh-all")
+async def refresh_all_forecasts(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Refresh forecasts for all GMP divisions.
+    Typically called after data reload or on schedule.
+    """
+    loader = get_data_loader()
+    gmp_df = loader.gmp
+
+    results = []
+    errors = []
+
+    for _, gmp_row in gmp_df.iterrows():
+        gmp_division = gmp_row['GMP']
+        try:
+            # Call single refresh endpoint logic inline
+            manager = ForecastManager(db)
+            bac_cents = int(gmp_row['amount_total_cents'])
+
+            # Quick aggregate for this division
+            budget_df = loader.budget
+            direct_costs_df = loader.direct_costs
+            mapped_budget = map_budget_to_gmp(budget_df.copy(), gmp_df)
+            mapped_direct = map_direct_to_budget(direct_costs_df.copy(), budget_df)
+
+            division_budget = mapped_budget[mapped_budget['gmp_division'] == gmp_division]
+            division_budget_codes = set(division_budget['Budget Code'].unique())
+            division_direct = mapped_direct[mapped_direct['mapped_budget_code'].isin(division_budget_codes)]
+            ac_cents = int(division_direct['amount_cents'].sum()) if not division_direct.empty else 0
+
+            snapshot = manager.compute_forecast(
+                gmp_division=gmp_division,
+                bac_cents=bac_cents,
+                ac_cents=ac_cents,
+                trigger='batch_refresh'
+            )
+
+            results.append({
+                'gmp_division': gmp_division,
+                'eac_cents': snapshot.eac_cents,
+                'status': 'success'
+            })
+
+        except Exception as e:
+            errors.append({
+                'gmp_division': gmp_division,
+                'error': str(e)
+            })
+
+    return {
+        'refreshed': len(results),
+        'errors': len(errors),
+        'results': results,
+        'error_details': errors
     }
 
 

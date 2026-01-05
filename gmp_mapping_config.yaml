@@ -561,3 +561,128 @@ integrations:
       - "./data/budget.csv"
       - "./data/direct_costs_by_group.csv"
       - "./data/allocations.csv"
+
+
+# ==============================================================================
+# SECTION 11: FORECASTING CONFIGURATION
+# ==============================================================================
+# Configuration for the line-level forecasting module.
+# Controls default methods, parameters, time buckets, and confidence bands.
+
+forecasting:
+  # Enable/disable forecasting module
+  enabled: true
+
+  # Default forecasting method for new GMP divisions
+  # Options: evm, pert, parametric, ml_linear, manual
+  default_method: "evm"
+
+  # Automatic refresh settings
+  auto_refresh:
+    enabled: true
+    on_transaction_post: true    # Refresh when new transactions are posted
+    on_mapping_change: true      # Refresh when mappings change
+    refresh_delay_seconds: 300   # Wait 5 min to batch multiple changes
+
+  # EVM (Earned Value Management) settings
+  evm:
+    # Default CPI adjustment factor (1.0 = at budget rate)
+    default_performance_factor: 1.0
+
+    # Minimum AC (in cents) before using CPI calculation
+    # Below this, forecast = BAC
+    min_ac_for_cpi: 1000000  # $10,000
+
+    # If EV is not available, use AC as proxy?
+    use_ac_as_ev_proxy: true
+
+    # Default SPI if not provided (1.0 = on schedule)
+    default_spi: 1.0
+
+  # PERT (Three-Point Estimating) settings
+  pert:
+    # Default spread percentage for O and P if not specified
+    # E.g., 0.20 means O = M * 0.8, P = M * 1.2
+    default_spread_pct: 0.20
+
+    # Confidence level labels based on spread ratio
+    spread_thresholds:
+      high: 0.15      # < 15% spread = high confidence
+      medium: 0.35    # < 35% spread = medium confidence
+      # > 35% = low confidence
+
+  # Parametric estimating settings
+  parametric:
+    default_complexity_factor: 1.0
+
+    # Named complexity factors for UI selection
+    complexity_factors:
+      low: 0.90
+      normal: 1.00
+      high: 1.15
+      very_high: 1.30
+
+  # Time bucket configuration
+  time_buckets:
+    # Default view granularity
+    default_granularity: "weekly"
+
+    # Week definition: ISO (Mon-Sun) or US (Sun-Sat)
+    week_standard: "iso"
+
+    # Default distribution method for remaining cost
+    # Options: linear, front_loaded, back_loaded
+    distribution_method: "linear"
+
+    # Project date handling
+    project_dates:
+      # If null, auto-detect from first transaction
+      start_date: null
+      # If null, use config completion_date or default to 6 months from as_of_date
+      end_date: null
+
+  # Confidence bands (matches suggestion_engine pattern)
+  confidence_bands:
+    high:
+      min_score: 0.80
+      color: "#22c55e"  # Green
+      label: "High Confidence"
+    medium:
+      min_score: 0.60
+      color: "#eab308"  # Yellow
+      label: "Medium Confidence"
+    low:
+      min_score: 0.0
+      color: "#ef4444"  # Red
+      label: "Low Confidence"
+
+  # Snapshot retention policy
+  snapshots:
+    # Days to retain historical snapshots
+    retention_days: 365
+
+    # Maximum snapshots to keep per GMP division
+    max_per_division: 100
+
+    # Cleanup schedule (cron-like, run during nightly job)
+    cleanup_enabled: true
+
+  # Export settings
+  export:
+    # Available formats
+    formats:
+      - csv
+      - xlsx
+
+    # Include in export
+    include_fields:
+      - period_label
+      - period_start
+      - period_end
+      - period_type
+      - actual
+      - forecast
+      - blended
+      - cumulative
+      - west_split
+      - east_split
