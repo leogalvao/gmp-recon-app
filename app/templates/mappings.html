@@ -1464,7 +1464,7 @@ class SearchableDropdown {
 
     positionDropdown() {
         const rect = this.input.getBoundingClientRect();
-        const dropdownHeight = Math.min(this.dropdown.scrollHeight, 240);
+        const dropdownHeight = 240; // Use fixed max height for stable positioning
         const spaceBelow = window.innerHeight - rect.bottom;
         const spaceAbove = rect.top;
 
@@ -1476,7 +1476,18 @@ class SearchableDropdown {
         }
 
         this.dropdown.style.left = (rect.left + window.scrollX) + 'px';
-        this.dropdown.style.width = rect.width + 'px';
+        // Use stable width - at least input width but allow for longer content
+        const width = Math.max(rect.width, 280);
+        this.dropdown.style.width = width + 'px';
+    }
+
+    // Debounce helper to prevent excessive repositioning
+    debounce(fn, delay) {
+        let timeoutId;
+        return (...args) => {
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => fn.apply(this, args), delay);
+        };
     }
 
     open() {
@@ -1486,9 +1497,9 @@ class SearchableDropdown {
         this.input.setAttribute('aria-expanded', 'true');
         this.positionDropdown();
 
-        // Reposition on scroll/resize
-        this.scrollHandler = () => this.positionDropdown();
-        this.resizeHandler = () => this.positionDropdown();
+        // Debounced reposition on scroll/resize to prevent jitter
+        this.scrollHandler = this.debounce(() => this.positionDropdown(), 16);
+        this.resizeHandler = this.debounce(() => this.positionDropdown(), 100);
         window.addEventListener('scroll', this.scrollHandler, true);
         window.addEventListener('resize', this.resizeHandler);
     }
@@ -1881,18 +1892,26 @@ function toggleKeyboardHelp() {
 
 .searchable-dropdown-input {
     width: 100%;
-    padding: 0.25rem 0.5rem;
+    padding: 0.375rem 0.5rem;
     font-size: 0.875rem;
     border: 1px solid #d1d5db;
     border-radius: 0.25rem;
     background: white;
     box-sizing: border-box;
+    /* Stable dimensions */
+    height: 34px;
+    line-height: 1.25;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .searchable-dropdown-input:focus {
     outline: none;
     border-color: #3b82f6;
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+.searchable-dropdown-input::placeholder {
+    color: #9ca3af;
 }
 
 /* Portal dropdown - fixed position relative to viewport */
@@ -1903,9 +1922,15 @@ function toggleKeyboardHelp() {
     border-radius: 0.375rem;
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
     max-height: 240px;
+    min-width: 280px;
     overflow-y: auto;
     overflow-x: hidden;
     z-index: 99999;
+    /* Prevent layout shifts */
+    contain: layout style;
+    will-change: transform;
+    /* Stable scrollbar */
+    scrollbar-gutter: stable;
 }
 
 .searchable-dropdown-item {
@@ -1916,6 +1941,10 @@ function toggleKeyboardHelp() {
     overflow: hidden;
     text-overflow: ellipsis;
     background: white;
+    /* Stable height */
+    min-height: 36px;
+    line-height: 20px;
+    box-sizing: border-box;
 }
 
 .searchable-dropdown-item:hover,
@@ -1938,6 +1967,7 @@ function toggleKeyboardHelp() {
     color: #6b7280;
     font-size: 0.875rem;
     text-align: center;
+    min-height: 44px;
 }
 
 /* Keyboard Navigation Styles */
