@@ -18,6 +18,13 @@ from app.models import (
 from app.modules.etl import parse_money_to_cents, cents_to_display
 
 
+def json_serial(obj):
+    """JSON serializer for objects not serializable by default json code."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
+
+
 # =============================================================================
 # CALCULATION ENGINES
 # =============================================================================
@@ -989,7 +996,7 @@ class ForecastManager:
                 action='param_update',
                 field='params',
                 old_value=None,
-                new_value=json.dumps(params),
+                new_value=json.dumps(params, default=json_serial),
                 reason="; ".join(changes),
                 changed_by=changed_by
             )
@@ -1025,8 +1032,8 @@ class ForecastManager:
             gmp_division=gmp_division,
             action=action,
             field_changed=field,
-            old_value=json.dumps(old_value) if old_value is not None else None,
-            new_value=json.dumps(new_value) if new_value is not None else None,
+            old_value=json.dumps(old_value, default=json_serial) if old_value is not None else None,
+            new_value=json.dumps(new_value, default=json_serial) if new_value is not None else None,
             previous_eac_cents=previous_eac,
             new_eac_cents=new_eac,
             change_reason=reason,

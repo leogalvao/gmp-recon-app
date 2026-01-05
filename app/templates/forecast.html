@@ -872,7 +872,7 @@
 
 {% block extra_scripts %}
 <script>
-const gmpDivision = "{{ gmp_division }}";
+const gmpDivision = {{ gmp_division|tojson }};
 const isProjectView = {{ 'true' if is_project_view else 'false' }};
 let currentGranularity = "{{ granularity }}";
 let selectedMethod = "{{ config.method }}";
