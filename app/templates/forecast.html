@@ -344,6 +344,15 @@
                         {% if is_project_view and forecast.division_count is defined %}
                         <span class="badge badge-gray">{{ forecast.division_count }} division{{ 's' if forecast.division_count != 1 else '' }}</span>
                         {% endif %}
+                        <!-- Side Filter Badge -->
+                        {% if side_filter %}
+                        <span class="text-xs px-2 py-1 rounded-full
+                            {% if side_filter == 'EAST' %}bg-blue-100 text-blue-800
+                            {% elif side_filter == 'WEST' %}bg-green-100 text-green-800
+                            {% else %}bg-purple-100 text-purple-800{% endif %}">
+                            {{ side_filter }}
+                        </span>
+                        {% endif %}
                     </div>
                     <p class="text-gray-500 text-sm">
                         {% if is_project_view %}
@@ -357,7 +366,7 @@
                 </div>
                 <div class="flex items-center gap-2">
                     {% if not is_project_view %}
-                    <a href="/api/gmp/{{ gmp_division | urlencode }}/forecast/export?format=csv&granularity={{ granularity }}"
+                    <a href="/api/gmp/{{ gmp_division | urlencode }}/forecast/export?format=csv&granularity={{ granularity }}{% if side_filter %}&side={{ side_filter }}{% endif %}"
                        class="btn btn-secondary text-sm">
                         <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
@@ -374,18 +383,33 @@
                 </div>
             </div>
 
+            <!-- Side Filter -->
+            {% if available_sides is defined and available_sides %}
+            <div class="mb-4 p-3 bg-gray-50 rounded-lg">
+                <div class="flex flex-wrap items-center gap-4">
+                    <span class="text-sm font-medium text-gray-700">Side:</span>
+                    <select id="sideFilter" onchange="applySideFilter(this.value)" class="border rounded-lg px-3 py-1.5 text-sm">
+                        <option value="">All Sides</option>
+                        {% for s in available_sides %}
+                        <option value="{{ s.value }}" {% if side_filter == s.value %}selected{% endif %}>{{ s.label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            {% endif %}
+
             <!-- Division Selector (Project View) -->
             {% if all_divisions is defined and all_divisions %}
             <div class="mb-6 p-4 bg-gray-50 rounded-lg">
                 <div class="flex flex-wrap items-center gap-4">
                     <span class="text-sm font-medium text-gray-700">Filter by Division:</span>
                     <div class="flex flex-wrap gap-2">
-                        <a href="/forecast"
+                        <a href="/forecast{% if side_filter %}?side={{ side_filter }}{% endif %}"
                            class="px-3 py-1.5 text-sm rounded-full transition-colors {% if not selected_divisions %}bg-blue-600 text-white{% else %}bg-white border border-gray-300 text-gray-700 hover:bg-gray-100{% endif %}">
                             All Divisions
                         </a>
                         {% for div in all_divisions %}
-                        <a href="/forecast?divisions={{ div.name | urlencode }}"
+                        <a href="/forecast?divisions={{ div.name | urlencode }}{% if side_filter %}&side={{ side_filter }}{% endif %}"
                            class="px-3 py-1.5 text-sm rounded-full transition-colors {% if div.name in selected_divisions %}bg-blue-600 text-white{% else %}bg-white border border-gray-300 text-gray-700 hover:bg-gray-100{% endif %}">
                             {{ div.name }}
                         </a>
@@ -481,7 +505,7 @@
                                 </span>
                             </td>
                             <td class="py-3 px-4 text-center">
-                                <a href="/gmp/{{ div.gmp_division | urlencode }}/forecast"
+                                <a href="/gmp/{{ div.gmp_division | urlencode }}/forecast{% if side_filter %}?side={{ side_filter }}{% endif %}"
                                    class="text-blue-600 hover:text-blue-800 text-sm font-medium">
                                     View Details
                                 </a>
@@ -876,6 +900,17 @@ const gmpDivision = {{ gmp_division|tojson }};
 const isProjectView = {{ 'true' if is_project_view else 'false' }};
 let currentGranularity = "{{ granularity }}";
 let selectedMethod = "{{ config.method }}";
+
+// Side filter - navigates to URL with side parameter
+function applySideFilter(side) {
+    const url = new URL(window.location.href);
+    if (side) {
+        url.searchParams.set('side', side);
+    } else {
+        url.searchParams.delete('side');
+    }
+    window.location.href = url.toString();
+}
 
 // Chart initialization
 {% if forecast.has_forecast and periods and periods.periods %}

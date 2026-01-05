@@ -9,12 +9,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional, List
 import json
 import pandas as pd
 import numpy as np
 
-from fastapi import FastAPI, Request, Depends, Form, HTTPException
+from fastapi import FastAPI, Request, Depends, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -23,7 +23,8 @@ import io
 
 from app.models import (
     init_db, get_db, ensure_default_settings,
-    Settings, Run, BudgetToGMP, DirectToBudget, Allocation, Duplicate
+    Settings, Run, BudgetToGMP, DirectToBudget, Allocation, Duplicate,
+    SideConfiguration
 )
 from app.modules.etl import get_data_loader, cents_to_display, get_file_hashes
 from app.modules.mapping import (
@@ -163,7 +164,7 @@ def check_file_changes():
 
 # ------------ Helper Functions ------------
 
-def run_full_reconciliation(db: Session) -> Dict:
+def run_full_reconciliation(db: Session, side_filter: Optional[str] = None) -> Dict:
     """
     Execute full reconciliation pipeline:
     1. Load data
@@ -172,21 +173,65 @@ def run_full_reconciliation(db: Session) -> Dict:
     4. Apply allocations
     5. Run ML predictions
     6. Compute reconciliation
+
+    Args:
+        db: Database session
+        side_filter: Optional side filter (EAST, WEST, BOTH). When EAST/WEST is specified,
+                     includes BOTH mappings as well.
     """
     data_loader = get_data_loader()
     settings = get_settings(db)
-    
+
     # Get data
     gmp_df = data_loader.gmp.copy()
     budget_df = data_loader.budget.copy()
     direct_costs_df = data_loader.direct_costs.copy()
     allocations_df = data_loader.allocations.copy()
-    
+
     # Map Budget to GMP
     budget_df = map_budget_to_gmp(budget_df, gmp_df, db)
-    
+
     # Map Direct Costs to Budget
     direct_costs_df = map_direct_to_budget(direct_costs_df, budget_df, db)
+
+    # Apply side filter if specified
+    if side_filter:
+        # Get budget codes that match the side filter
+        if side_filter != 'BOTH':
+            budget_side_mappings = db.query(BudgetToGMP).filter(
+                BudgetToGMP.side.in_([side_filter, 'BOTH'])
+            ).all()
+        else:
+            budget_side_mappings = db.query(BudgetToGMP).filter(
+                BudgetToGMP.side == 'BOTH'
+            ).all()
+
+        side_budget_codes = {m.budget_code for m in budget_side_mappings}
+
+        # Filter budget_df to only include budget codes matching the side
+        if side_budget_codes:
+            budget_df = budget_df[budget_df['Budget Code'].isin(side_budget_codes)]
+
+        # Get direct cost mappings that match the side filter
+        if side_filter != 'BOTH':
+            direct_side_mappings = db.query(DirectToBudget).filter(
+                DirectToBudget.side.in_([side_filter, 'BOTH'])
+            ).all()
+        else:
+            direct_side_mappings = db.query(DirectToBudget).filter(
+                DirectToBudget.side == 'BOTH'
+            ).all()
+
+        side_direct_keys = {(m.cost_code, m.name) for m in direct_side_mappings}
+
+        # Filter direct_costs_df to only include items matching the side
+        if side_direct_keys:
+            direct_costs_df = direct_costs_df[
+                direct_costs_df.apply(
+                    lambda r: (r.get('Cost Code', ''), r.get('Name', '')) in side_direct_keys,
+                    axis=1
+                )
+            ]
     
     # Detect duplicates
     duplicates, _ = detect_duplicates(direct_costs_df)
@@ -245,11 +290,26 @@ async def root():
 
 
 @app.get("/gmp", response_class=HTMLResponse)
-async def gmp_page(request: Request, db: Session = Depends(get_db)):
-    """Main GMP reconciliation table page."""
+async def gmp_page(
+    request: Request,
+    side: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Main GMP reconciliation table page with optional side filter."""
     try:
-        result = run_full_reconciliation(db)
-        
+        # Get available sides for filter dropdown
+        side_configs = db.query(SideConfiguration).filter(SideConfiguration.is_active == True).all()
+        available_sides = [{'value': s.side, 'label': s.display_name} for s in side_configs]
+
+        # Validate and normalize side filter
+        side_filter = None
+        if side:
+            side_upper = side.upper()
+            if side_upper in VALID_SIDES:
+                side_filter = side_upper
+
+        result = run_full_reconciliation(db, side_filter=side_filter)
+
         return templates.TemplateResponse("gmp.html", {
             "request": request,
             "rows": result['recon_rows'],
@@ -259,6 +319,8 @@ async def gmp_page(request: Request, db: Session = Depends(get_db)):
             "duplicates_summary": result['duplicates_summary'],
             "settings": result['settings'],
             "last_ml_train": result['last_ml_train'],
+            "side_filter": side_filter,
+            "available_sides": available_sides,
             "active_page": "gmp"
         })
     except Exception as e:
@@ -274,10 +336,22 @@ async def forecast_project_page(
     request: Request,
     divisions: str = None,
     granularity: str = "weekly",
+    side: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """Project-level forecast page with optional division filtering."""
+    """Project-level forecast page with optional division and side filtering."""
     from urllib.parse import unquote
+
+    # Get available sides for filter dropdown
+    side_configs = db.query(SideConfiguration).filter(SideConfiguration.is_active == True).all()
+    available_sides = [{'value': s.side, 'label': s.display_name} for s in side_configs]
+
+    # Validate and normalize side filter
+    side_filter = None
+    if side:
+        side_upper = side.upper()
+        if side_upper in VALID_SIDES:
+            side_filter = side_upper
 
     # Get all available divisions from config
     app_config = get_config()
@@ -368,6 +442,8 @@ async def forecast_project_page(
         "periods": {'periods': [], 'period_count': 0},
         "all_divisions": all_divisions,
         "selected_divisions": selected_divisions,
+        "side_filter": side_filter,
+        "available_sides": available_sides,
         "is_project_view": True,
         "active_page": "forecast"
     })
@@ -378,12 +454,24 @@ async def forecast_page(
     request: Request,
     gmp_division: str,
     granularity: str = "weekly",
+    side: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """Forecast page for a specific GMP division."""
     from urllib.parse import unquote
 
     gmp_division = unquote(gmp_division)
+
+    # Get available sides for filter dropdown
+    side_configs = db.query(SideConfiguration).filter(SideConfiguration.is_active == True).all()
+    available_sides = [{'value': s.side, 'label': s.display_name} for s in side_configs]
+
+    # Validate and normalize side filter
+    side_filter = None
+    if side:
+        side_upper = side.upper()
+        if side_upper in VALID_SIDES:
+            side_filter = side_upper
 
     # Validate granularity
     if granularity not in ['weekly', 'monthly']:
@@ -481,20 +569,50 @@ async def forecast_page(
         "forecast": forecast,
         "config": config_dict,
         "periods": periods_data,
+        "side_filter": side_filter,
+        "available_sides": available_sides,
         "active_page": "gmp"
     })
 
 
 @app.get("/mappings", response_class=HTMLResponse)
-async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Session = Depends(get_db)):
+async def mappings_page(
+    request: Request,
+    tab: str = "budget_to_gmp",
+    side: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
     """Mapping editor page with tabs for Budget→GMP, Direct→Budget, and Allocations."""
     from rapidfuzz import fuzz, process
 
     data_loader = get_data_loader()
 
-    # Get mappings from database
-    budget_mappings_db = db.query(BudgetToGMP).all()
-    direct_mappings_db = db.query(DirectToBudget).all()
+    # Get available sides for filter dropdown
+    side_configs = db.query(SideConfiguration).filter(SideConfiguration.is_active == True).all()
+    available_sides = [{'value': s.side, 'label': s.display_name} for s in side_configs]
+
+    # Validate and normalize side filter
+    side_filter = None
+    if side:
+        side_upper = side.upper()
+        if side_upper in VALID_SIDES:
+            side_filter = side_upper
+
+    # Get mappings from database (with optional side filter)
+    budget_query = db.query(BudgetToGMP)
+    direct_query = db.query(DirectToBudget)
+
+    if side_filter:
+        # Include BOTH when filtering by EAST or WEST
+        if side_filter != 'BOTH':
+            budget_query = budget_query.filter(BudgetToGMP.side.in_([side_filter, 'BOTH']))
+            direct_query = direct_query.filter(DirectToBudget.side.in_([side_filter, 'BOTH']))
+        else:
+            budget_query = budget_query.filter(BudgetToGMP.side == side_filter)
+            direct_query = direct_query.filter(DirectToBudget.side == side_filter)
+
+    budget_mappings_db = budget_query.all()
+    direct_mappings_db = direct_query.all()
     allocations = db.query(Allocation).all()
 
     # Get available options
@@ -539,11 +657,15 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
     # Build enriched budget mappings list (with descriptions)
     budget_mappings = []
     mapped_budget_codes = set()
+    budget_side_lookup = {}  # To track side for each budget code
     for m in budget_mappings_db:
         mapped_budget_codes.add(m.budget_code)
+        budget_side_lookup[m.budget_code] = m.side
         budget_mappings.append({
+            'id': m.id,
             'budget_code': m.budget_code,
             'gmp_division': m.gmp_division,
+            'side': m.side,
             'confidence': m.confidence,
             'description': budget_desc_lookup.get(m.budget_code, ''),
             'cost_type': budget_type_lookup.get(m.budget_code, ''),
@@ -560,6 +682,7 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
             'Cost Type': row.get('Cost Type', ''),
             'division_key': row.get('division_key', ''),
             'gmp_division': row.get('gmp_division'),
+            'side': budget_side_lookup.get(bc, 'BOTH'),  # Default to BOTH for unmapped
             'mapping_confidence': row.get('mapping_confidence', 0),
             'mapping_method': row.get('mapping_method', 'unmapped'),
             'is_mapped': bc in mapped_budget_codes or row.get('gmp_division') is not None
@@ -589,7 +712,9 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
     for m in direct_mappings_db:
         key = (m.cost_code, m.name)
         direct_mappings_lookup[key] = {
+            'id': m.id,
             'budget_code': m.budget_code,
+            'side': m.side,
             'confidence': m.confidence
         }
 
@@ -626,7 +751,9 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
         if key in direct_mappings_lookup:
             mapping = direct_mappings_lookup[key]
             item['is_mapped'] = True
+            item['mapping_id'] = mapping['id']
             item['mapped_budget_code'] = mapping['budget_code']
+            item['side'] = mapping['side']
             item['mapping_confidence'] = mapping['confidence']
             item['budget_description'] = budget_desc_lookup.get(mapping['budget_code'], '')
             item['confidence_band'] = 'mapped'
@@ -634,6 +761,7 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
             item['top_suggestion'] = None
         else:
             item['is_mapped'] = False
+            item['side'] = 'BOTH'  # Default for unmapped
             item['mapped_budget_code'] = None
             item['mapping_confidence'] = 0
             item['budget_description'] = ''
@@ -672,6 +800,8 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
     return templates.TemplateResponse("mappings.html", {
         "request": request,
         "active_tab": tab,
+        "side_filter": side_filter,
+        "available_sides": available_sides,
         "budget_mappings": budget_mappings,
         "mapped_budget": mapped_budget,
         "mapped_direct": mapped_direct,
@@ -1125,11 +1255,29 @@ async def recon_summary_json(db: Session = Depends(get_db)):
 
 
 @app.get("/api/gmp/drilldown/{gmp_division}")
-async def gmp_drilldown(gmp_division: str, db: Session = Depends(get_db)):
+async def gmp_drilldown(
+    gmp_division: str,
+    side: Optional[str] = Query(None, description="Filter by side: EAST, WEST, BOTH"),
+    include_both: bool = Query(True, description="When filtering by EAST/WEST, also include BOTH"),
+    db: Session = Depends(get_db)
+):
     """
     Get detailed breakdown of direct costs for a GMP division.
     Shows budget codes and individual records contributing to Assigned West/East.
+
+    Query Parameters:
+    - side: Filter by side (EAST, WEST, BOTH) - optional
+    - include_both: When filtering by EAST/WEST, also include BOTH mappings (default: True)
     """
+    # Validate side parameter
+    if side:
+        side = side.upper()
+        if side not in VALID_SIDES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid side. Must be one of: {', '.join(VALID_SIDES)}"
+            )
+
     data_loader = get_data_loader()
     settings = get_settings(db)
 
@@ -1137,6 +1285,43 @@ async def gmp_drilldown(gmp_division: str, db: Session = Depends(get_db)):
     gmp_df = data_loader.gmp.copy()
     budget_df = map_budget_to_gmp(data_loader.budget.copy(), gmp_df, db)
     direct_df = map_direct_to_budget(data_loader.direct_costs.copy(), budget_df, db)
+
+    # Apply side filter to mappings if specified
+    if side:
+        # Get budget mappings for this side
+        if include_both and side != 'BOTH':
+            budget_side_filter = db.query(BudgetToGMP).filter(
+                BudgetToGMP.side.in_([side, 'BOTH'])
+            ).all()
+        else:
+            budget_side_filter = db.query(BudgetToGMP).filter(
+                BudgetToGMP.side == side
+            ).all()
+
+        # Filter budget_df to only include budget codes matching the side
+        side_budget_codes = {m.budget_code for m in budget_side_filter}
+        if side_budget_codes:
+            budget_df = budget_df[budget_df['Budget Code'].isin(side_budget_codes)]
+
+        # Similarly filter direct costs by side
+        if include_both and side != 'BOTH':
+            direct_side_filter = db.query(DirectToBudget).filter(
+                DirectToBudget.side.in_([side, 'BOTH'])
+            ).all()
+        else:
+            direct_side_filter = db.query(DirectToBudget).filter(
+                DirectToBudget.side == side
+            ).all()
+
+        # Create lookup for direct cost filtering
+        side_direct_keys = {(m.cost_code, m.name) for m in direct_side_filter}
+        if side_direct_keys:
+            direct_df = direct_df[
+                direct_df.apply(
+                    lambda r: (r.get('Cost Code', ''), r.get('Name', '')) in side_direct_keys,
+                    axis=1
+                )
+            ]
 
     # Apply allocations
     allocations_df = data_loader.allocations.copy()
@@ -1153,6 +1338,10 @@ async def gmp_drilldown(gmp_division: str, db: Session = Depends(get_db)):
         budget_df=budget_df,
         as_of_date=settings.get('as_of_date')
     )
+
+    # Add side filter info to response
+    drilldown['side_filter'] = side
+    drilldown['include_both'] = include_both
 
     return convert_numpy_types(drilldown)
 
@@ -1371,6 +1560,496 @@ async def get_allocation_history(gmp_division: str, db: Session = Depends(get_db
             }
             for log in logs
         ]
+    }
+
+
+# ------------ Side Configuration API Endpoints ------------
+
+VALID_SIDES = ['EAST', 'WEST', 'BOTH']
+
+
+@app.get("/api/sides")
+async def get_sides(
+    active_only: bool = True,
+    db: Session = Depends(get_db)
+):
+    """
+    Get list of available sides (EAST, WEST, BOTH) with configuration.
+
+    Query Parameters:
+    - active_only: Filter to only active sides (default: True)
+
+    Returns:
+    - List of side configurations with timeline info and allocation weights
+    """
+    query = db.query(SideConfiguration)
+    if active_only:
+        query = query.filter(SideConfiguration.is_active == True)
+
+    sides = query.order_by(SideConfiguration.id).all()
+
+    return {
+        'sides': [
+            {
+                'value': s.side.lower(),
+                'label': s.display_name,
+                'side': s.side,
+                'display_name': s.display_name,
+                'start_date': s.start_date.isoformat() if s.start_date else None,
+                'end_date': s.end_date.isoformat() if s.end_date else None,
+                'is_active': s.is_active,
+                'allocation_weight': s.allocation_weight
+            }
+            for s in sides
+        ],
+        'allocation_ratio': {
+            'east': next((s.allocation_weight for s in sides if s.side == 'EAST'), 0.5),
+            'west': next((s.allocation_weight for s in sides if s.side == 'WEST'), 0.5)
+        }
+    }
+
+
+@app.get("/api/sides/{side}")
+async def get_side_config(
+    side: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get configuration for a specific side.
+
+    Path Parameters:
+    - side: Side identifier (EAST, WEST, BOTH - case insensitive)
+    """
+    side_upper = side.upper()
+    if side_upper not in VALID_SIDES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid side. Must be one of: {', '.join(VALID_SIDES)}"
+        )
+
+    config = db.query(SideConfiguration).filter(
+        SideConfiguration.side == side_upper
+    ).first()
+
+    if not config:
+        raise HTTPException(status_code=404, detail=f"Side '{side}' not configured")
+
+    return {
+        'value': config.side.lower(),
+        'label': config.display_name,
+        'side': config.side,
+        'display_name': config.display_name,
+        'start_date': config.start_date.isoformat() if config.start_date else None,
+        'end_date': config.end_date.isoformat() if config.end_date else None,
+        'is_active': config.is_active,
+        'allocation_weight': config.allocation_weight
+    }
+
+
+@app.put("/api/sides/{side}")
+async def update_side_config(
+    side: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Update configuration for a specific side.
+
+    Path Parameters:
+    - side: Side identifier (EAST, WEST, BOTH)
+
+    Body:
+    {
+        "display_name": "East",
+        "start_date": "2025-06-01",  // ISO format, null to clear
+        "end_date": "2025-07-31",    // ISO format, null to clear
+        "is_active": true,
+        "allocation_weight": 0.5
+    }
+    """
+    side_upper = side.upper()
+    if side_upper not in VALID_SIDES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid side. Must be one of: {', '.join(VALID_SIDES)}"
+        )
+
+    config = db.query(SideConfiguration).filter(
+        SideConfiguration.side == side_upper
+    ).first()
+
+    if not config:
+        raise HTTPException(status_code=404, detail=f"Side '{side}' not configured")
+
+    body = await request.json()
+
+    # Update fields if provided
+    if 'display_name' in body:
+        config.display_name = body['display_name']
+
+    if 'start_date' in body:
+        if body['start_date']:
+            config.start_date = datetime.fromisoformat(body['start_date'])
+        else:
+            config.start_date = None
+
+    if 'end_date' in body:
+        if body['end_date']:
+            config.end_date = datetime.fromisoformat(body['end_date'])
+        else:
+            config.end_date = None
+
+    if 'is_active' in body:
+        config.is_active = body['is_active']
+
+    if 'allocation_weight' in body:
+        weight = float(body['allocation_weight'])
+        if not 0 <= weight <= 1:
+            raise HTTPException(status_code=400, detail="allocation_weight must be between 0 and 1")
+        config.allocation_weight = weight
+
+    config.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {
+        'success': True,
+        'side': config.side,
+        'display_name': config.display_name,
+        'updated_at': config.updated_at.isoformat()
+    }
+
+
+@app.get("/api/mappings")
+async def get_mappings(
+    mapping_type: str = Query("budget_to_gmp", description="Type: budget_to_gmp or direct_to_budget"),
+    side: Optional[str] = Query(None, description="Filter by side: EAST, WEST, BOTH"),
+    include_both: bool = Query(True, description="When filtering by EAST/WEST, also include BOTH"),
+    limit: int = Query(500, ge=1, le=5000, description="Max records to return"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get mappings with optional side filter.
+
+    Query Parameters:
+    - mapping_type: 'budget_to_gmp' or 'direct_to_budget'
+    - side: Filter by side (EAST, WEST, BOTH) - optional
+    - include_both: When filtering by EAST or WEST, also include BOTH mappings (default: True)
+    - limit: Max records (default: 500, max: 5000)
+    - offset: Pagination offset
+    """
+    # Validate side parameter
+    if side:
+        side = side.upper()
+        if side not in VALID_SIDES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid side. Must be one of: {', '.join(VALID_SIDES)}"
+            )
+
+    if mapping_type == "budget_to_gmp":
+        query = db.query(BudgetToGMP)
+
+        if side:
+            if include_both and side != 'BOTH':
+                query = query.filter(BudgetToGMP.side.in_([side, 'BOTH']))
+            else:
+                query = query.filter(BudgetToGMP.side == side)
+
+        total = query.count()
+        mappings = query.offset(offset).limit(limit).all()
+
+        return {
+            'mapping_type': mapping_type,
+            'side_filter': side,
+            'include_both': include_both,
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+            'mappings': [
+                {
+                    'id': m.id,
+                    'budget_code': m.budget_code,
+                    'cost_code_tier2': m.cost_code_tier2,
+                    'gmp_division': m.gmp_division,
+                    'side': m.side,
+                    'confidence': m.confidence,
+                    'created_at': m.created_at.isoformat() if m.created_at else None,
+                    'updated_at': m.updated_at.isoformat() if m.updated_at else None
+                }
+                for m in mappings
+            ]
+        }
+
+    elif mapping_type == "direct_to_budget":
+        query = db.query(DirectToBudget)
+
+        if side:
+            if include_both and side != 'BOTH':
+                query = query.filter(DirectToBudget.side.in_([side, 'BOTH']))
+            else:
+                query = query.filter(DirectToBudget.side == side)
+
+        total = query.count()
+        mappings = query.offset(offset).limit(limit).all()
+
+        return {
+            'mapping_type': mapping_type,
+            'side_filter': side,
+            'include_both': include_both,
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+            'mappings': [
+                {
+                    'id': m.id,
+                    'cost_code': m.cost_code,
+                    'name': m.name,
+                    'budget_code': m.budget_code,
+                    'side': m.side,
+                    'confidence': m.confidence,
+                    'method': m.method,
+                    'vendor_normalized': m.vendor_normalized,
+                    'created_at': m.created_at.isoformat() if m.created_at else None,
+                    'updated_at': m.updated_at.isoformat() if m.updated_at else None
+                }
+                for m in mappings
+            ]
+        }
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="mapping_type must be 'budget_to_gmp' or 'direct_to_budget'"
+        )
+
+
+@app.patch("/api/mappings/{mapping_type}/{mapping_id}/side")
+async def update_mapping_side(
+    mapping_type: str,
+    mapping_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Update the side assignment for a single mapping.
+
+    Path Parameters:
+    - mapping_type: 'budget_to_gmp' or 'direct_to_budget'
+    - mapping_id: ID of the mapping to update
+
+    Body:
+    {
+        "side": "EAST"  // EAST, WEST, or BOTH
+    }
+    """
+    body = await request.json()
+    new_side = body.get('side', '').upper()
+
+    if new_side not in VALID_SIDES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid side. Must be one of: {', '.join(VALID_SIDES)}"
+        )
+
+    if mapping_type == "budget_to_gmp":
+        mapping = db.query(BudgetToGMP).filter(BudgetToGMP.id == mapping_id).first()
+        if not mapping:
+            raise HTTPException(status_code=404, detail="Mapping not found")
+
+        old_side = mapping.side
+        mapping.side = new_side
+        mapping.updated_at = datetime.utcnow()
+        db.commit()
+
+        return {
+            'success': True,
+            'mapping_type': mapping_type,
+            'mapping_id': mapping_id,
+            'old_side': old_side,
+            'new_side': new_side,
+            'budget_code': mapping.budget_code,
+            'gmp_division': mapping.gmp_division
+        }
+
+    elif mapping_type == "direct_to_budget":
+        mapping = db.query(DirectToBudget).filter(DirectToBudget.id == mapping_id).first()
+        if not mapping:
+            raise HTTPException(status_code=404, detail="Mapping not found")
+
+        old_side = mapping.side
+        mapping.side = new_side
+        mapping.updated_at = datetime.utcnow()
+        db.commit()
+
+        return {
+            'success': True,
+            'mapping_type': mapping_type,
+            'mapping_id': mapping_id,
+            'old_side': old_side,
+            'new_side': new_side,
+            'cost_code': mapping.cost_code,
+            'budget_code': mapping.budget_code
+        }
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="mapping_type must be 'budget_to_gmp' or 'direct_to_budget'"
+        )
+
+
+@app.post("/api/mappings/bulk-side")
+async def bulk_update_mapping_side(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk update side assignment for multiple mappings.
+
+    Body:
+    {
+        "mapping_type": "budget_to_gmp",  // or "direct_to_budget"
+        "mapping_ids": [1, 2, 3, 4],      // List of mapping IDs to update
+        "side": "EAST"                     // New side value
+    }
+
+    Alternative - filter-based bulk update:
+    {
+        "mapping_type": "budget_to_gmp",
+        "filter": {
+            "current_side": "BOTH",           // Optional: only update mappings with this side
+            "gmp_division": "Concrete"        // Optional: only update mappings for this division
+        },
+        "side": "WEST"
+    }
+    """
+    body = await request.json()
+
+    mapping_type = body.get('mapping_type')
+    new_side = body.get('side', '').upper()
+    mapping_ids = body.get('mapping_ids', [])
+    filter_opts = body.get('filter', {})
+
+    if not mapping_type:
+        raise HTTPException(status_code=400, detail="mapping_type is required")
+
+    if new_side not in VALID_SIDES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid side. Must be one of: {', '.join(VALID_SIDES)}"
+        )
+
+    if not mapping_ids and not filter_opts:
+        raise HTTPException(
+            status_code=400,
+            detail="Either mapping_ids or filter must be provided"
+        )
+
+    updated_count = 0
+
+    if mapping_type == "budget_to_gmp":
+        if mapping_ids:
+            # Update by IDs
+            updated_count = db.query(BudgetToGMP).filter(
+                BudgetToGMP.id.in_(mapping_ids)
+            ).update({
+                BudgetToGMP.side: new_side,
+                BudgetToGMP.updated_at: datetime.utcnow()
+            }, synchronize_session=False)
+        else:
+            # Update by filter
+            query = db.query(BudgetToGMP)
+            if filter_opts.get('current_side'):
+                query = query.filter(BudgetToGMP.side == filter_opts['current_side'].upper())
+            if filter_opts.get('gmp_division'):
+                query = query.filter(BudgetToGMP.gmp_division == filter_opts['gmp_division'])
+            if filter_opts.get('budget_code'):
+                query = query.filter(BudgetToGMP.budget_code == filter_opts['budget_code'])
+
+            updated_count = query.update({
+                BudgetToGMP.side: new_side,
+                BudgetToGMP.updated_at: datetime.utcnow()
+            }, synchronize_session=False)
+
+    elif mapping_type == "direct_to_budget":
+        if mapping_ids:
+            # Update by IDs
+            updated_count = db.query(DirectToBudget).filter(
+                DirectToBudget.id.in_(mapping_ids)
+            ).update({
+                DirectToBudget.side: new_side,
+                DirectToBudget.updated_at: datetime.utcnow()
+            }, synchronize_session=False)
+        else:
+            # Update by filter
+            query = db.query(DirectToBudget)
+            if filter_opts.get('current_side'):
+                query = query.filter(DirectToBudget.side == filter_opts['current_side'].upper())
+            if filter_opts.get('budget_code'):
+                query = query.filter(DirectToBudget.budget_code == filter_opts['budget_code'])
+
+            updated_count = query.update({
+                DirectToBudget.side: new_side,
+                DirectToBudget.updated_at: datetime.utcnow()
+            }, synchronize_session=False)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="mapping_type must be 'budget_to_gmp' or 'direct_to_budget'"
+        )
+
+    db.commit()
+
+    return {
+        'success': True,
+        'mapping_type': mapping_type,
+        'new_side': new_side,
+        'updated_count': updated_count,
+        'filter_used': filter_opts if filter_opts else None,
+        'ids_provided': len(mapping_ids) if mapping_ids else 0
+    }
+
+
+@app.get("/api/mappings/side-summary")
+async def get_mapping_side_summary(db: Session = Depends(get_db)):
+    """
+    Get summary counts of mappings by side for both mapping types.
+    Useful for dashboard widgets and side distribution overview.
+    """
+    # Budget to GMP counts
+    btg_counts = {}
+    for side in VALID_SIDES:
+        count = db.query(BudgetToGMP).filter(BudgetToGMP.side == side).count()
+        btg_counts[side.lower()] = count
+
+    btg_total = sum(btg_counts.values())
+
+    # Direct to Budget counts
+    dtb_counts = {}
+    for side in VALID_SIDES:
+        count = db.query(DirectToBudget).filter(DirectToBudget.side == side).count()
+        dtb_counts[side.lower()] = count
+
+    dtb_total = sum(dtb_counts.values())
+
+    return {
+        'budget_to_gmp': {
+            'by_side': btg_counts,
+            'total': btg_total,
+            'percentages': {
+                k: round(v / btg_total * 100, 1) if btg_total > 0 else 0
+                for k, v in btg_counts.items()
+            }
+        },
+        'direct_to_budget': {
+            'by_side': dtb_counts,
+            'total': dtb_total,
+            'percentages': {
+                k: round(v / dtb_total * 100, 1) if dtb_total > 0 else 0
+                for k, v in dtb_counts.items()
+            }
+        }
     }
 
 

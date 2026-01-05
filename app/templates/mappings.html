@@ -43,6 +43,15 @@
                     onkeyup="filterTable('budgetTable', this.value)">
             </div>
             <div class="flex items-center gap-2">
+                <label class="text-sm text-gray-600">Side:</label>
+                <select id="filterSide" onchange="applySideFilter(this.value)" class="border rounded-lg px-3 py-2">
+                    <option value="">All Sides</option>
+                    {% for s in available_sides %}
+                    <option value="{{ s.value }}" {% if side_filter == s.value %}selected{% endif %}>{{ s.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="flex items-center gap-2">
                 <label class="text-sm text-gray-600">Show:</label>
                 <select id="filterStatus" onchange="filterByStatus('budgetTable', this.value)" class="border rounded-lg px-3 py-2">
                     <option value="all">All Items ({{ total_budget }})</option>
@@ -81,6 +90,7 @@
                         <th class="px-4 py-3 text-left font-semibold text-gray-700">Description</th>
                         <th class="px-4 py-3 text-center font-semibold text-gray-700 w-20">Type</th>
                         <th class="px-4 py-3 text-left font-semibold text-gray-700 w-64">GMP Division</th>
+                        <th class="px-4 py-3 text-center font-semibold text-gray-700 w-16">Side</th>
                         <th class="px-4 py-3 text-center font-semibold text-gray-700 w-20">Method</th>
                         <th class="px-4 py-3 text-center font-semibold text-gray-700 w-28">Action</th>
                     </tr>
@@ -117,6 +127,14 @@
                             </select>
                         </td>
                         <td class="px-4 py-3 text-center">
+                            <select class="side-select border rounded px-1 py-0.5 text-xs"
+                                    data-budget-code="{{ item['Budget Code'] }}">
+                                <option value="BOTH" selected>Both</option>
+                                <option value="EAST">East</option>
+                                <option value="WEST">West</option>
+                            </select>
+                        </td>
+                        <td class="px-4 py-3 text-center">
                             <span class="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700">unmapped</span>
                         </td>
                         <td class="px-4 py-3 text-center">
@@ -150,6 +168,16 @@
                                 {% for gmp in gmp_options %}
                                 <option value="{{ gmp }}" {% if gmp == item['gmp_division'] %}selected{% endif %}>{{ gmp }}</option>
                                 {% endfor %}
+                            </select>
+                        </td>
+                        <td class="px-4 py-3 text-center">
+                            <select class="side-select border border-green-300 rounded px-1 py-0.5 text-xs bg-white"
+                                    data-budget-code="{{ item['Budget Code'] }}"
+                                    data-original-side="{{ item.get('side', 'BOTH') }}"
+                                    onchange="updateMappingSide(this, 'budget_to_gmp')">
+                                <option value="BOTH" {% if item.get('side', 'BOTH') == 'BOTH' %}selected{% endif %}>Both</option>
+                                <option value="EAST" {% if item.get('side') == 'EAST' %}selected{% endif %}>East</option>
+                                <option value="WEST" {% if item.get('side') == 'WEST' %}selected{% endif %}>West</option>
                             </select>
                         </td>
                         <td class="px-4 py-3 text-center">
@@ -196,6 +224,15 @@
                 <input type="text" id="searchDirect" placeholder="Search by vendor, cost code, name..."
                     class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     onkeyup="filterDirectTable(this.value)">
+            </div>
+            <div class="flex items-center gap-2">
+                <label class="text-sm text-gray-600">Side:</label>
+                <select id="filterDirectSide" onchange="applySideFilter(this.value)" class="border rounded-lg px-3 py-2">
+                    <option value="">All Sides</option>
+                    {% for s in available_sides %}
+                    <option value="{{ s.value }}" {% if side_filter == s.value %}selected{% endif %}>{{ s.label }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="flex items-center gap-2">
                 <label class="text-sm text-gray-600">Show:</label>
@@ -289,7 +326,8 @@
                         <th class="px-3 py-3 text-left font-semibold text-gray-700">Name</th>
                         <th class="px-3 py-3 text-right font-semibold text-gray-700 w-24">Amount</th>
                         <th class="px-3 py-3 text-center font-semibold text-gray-700 w-14">Type</th>
-                        <th class="px-3 py-3 text-left font-semibold text-gray-700 w-72">Budget Code Mapping</th>
+                        <th class="px-3 py-3 text-left font-semibold text-gray-700 w-64">Budget Code Mapping</th>
+                        <th class="px-3 py-3 text-center font-semibold text-gray-700 w-16">Side</th>
                         <th class="px-3 py-3 text-center font-semibold text-gray-700 w-16">Status</th>
                         <th class="px-3 py-3 text-center font-semibold text-gray-700 w-24">Action</th>
                     </tr>
@@ -408,6 +446,16 @@
                             </div>
                         </td>
                         <td class="px-3 py-2 text-center">
+                            <select class="side-select border rounded px-1 py-0.5 text-xs"
+                                    data-dc-id="{{ item.get('direct_cost_id', '') }}"
+                                    data-cost-code="{{ item.get('Cost Code', '') }}"
+                                    data-name="{{ item.get('Name', '') }}">
+                                <option value="BOTH" selected>Both</option>
+                                <option value="EAST">East</option>
+                                <option value="WEST">West</option>
+                            </select>
+                        </td>
+                        <td class="px-3 py-2 text-center">
                             <span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">unmapped</span>
                         </td>
                         <td class="px-3 py-2 text-center">
@@ -490,6 +538,19 @@
                                     {% endfor %}
                                 </select>
                             </div>
+                        </td>
+                        <td class="px-3 py-2 text-center">
+                            <select class="side-select border border-green-300 rounded px-1 py-0.5 text-xs bg-white"
+                                    data-mapping-id="{{ item.get('mapping_id', '') }}"
+                                    data-dc-id="{{ item.get('direct_cost_id', '') }}"
+                                    data-cost-code="{{ item.get('Cost Code', '') }}"
+                                    data-name="{{ item.get('Name', '') }}"
+                                    data-original-side="{{ item.get('side', 'BOTH') }}"
+                                    onchange="updateMappingSide(this, 'direct_to_budget')">
+                                <option value="BOTH" {% if item.get('side', 'BOTH') == 'BOTH' %}selected{% endif %}>Both</option>
+                                <option value="EAST" {% if item.get('side') == 'EAST' %}selected{% endif %}>East</option>
+                                <option value="WEST" {% if item.get('side') == 'WEST' %}selected{% endif %}>West</option>
+                            </select>
                         </td>
                         <td class="px-3 py-2 text-center">
                             <span class="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">mapped</span>
@@ -992,6 +1053,109 @@ function filterByType(type) {
             row.style.display = rowType === type ? '' : 'none';
         }
     });
+}
+
+// Side filter - navigates to URL with side parameter for server-side filtering
+function applySideFilter(side) {
+    const url = new URL(window.location.href);
+    const tab = url.searchParams.get('tab') || 'budget_to_gmp';
+
+    if (side) {
+        url.searchParams.set('side', side);
+    } else {
+        url.searchParams.delete('side');
+    }
+    url.searchParams.set('tab', tab);
+
+    window.location.href = url.toString();
+}
+
+// Update side for an existing mapping via API
+async function updateMappingSide(selectElement, mappingType) {
+    const newSide = selectElement.value;
+    const originalSide = selectElement.dataset.originalSide;
+
+    // Skip if no change
+    if (newSide === originalSide) {
+        return;
+    }
+
+    let mappingId;
+    let endpoint;
+
+    if (mappingType === 'budget_to_gmp') {
+        // For budget mappings, we need to find the mapping by budget code
+        const budgetCode = selectElement.dataset.budgetCode;
+        // Use bulk update with filter
+        endpoint = '/api/mappings/bulk-side';
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mapping_type: 'budget_to_gmp',
+                    filter: { budget_code: budgetCode },
+                    side: newSide
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to update side');
+            }
+
+            const result = await response.json();
+            if (result.success) {
+                selectElement.dataset.originalSide = newSide;
+                showToast(`Side updated to ${newSide}`, 'success');
+                // Update visual styling
+                updateSideSelectStyle(selectElement, newSide);
+            }
+        } catch (error) {
+            console.error('Error updating side:', error);
+            selectElement.value = originalSide;
+            showToast('Failed to update side', 'error');
+        }
+    } else if (mappingType === 'direct_to_budget') {
+        // For direct mappings, use the mapping ID if available
+        mappingId = selectElement.dataset.mappingId;
+        if (mappingId) {
+            endpoint = `/api/mappings/direct_to_budget/${mappingId}/side`;
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ side: newSide })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to update side');
+                }
+
+                const result = await response.json();
+                if (result.success) {
+                    selectElement.dataset.originalSide = newSide;
+                    showToast(`Side updated to ${newSide}`, 'success');
+                    updateSideSelectStyle(selectElement, newSide);
+                }
+            } catch (error) {
+                console.error('Error updating side:', error);
+                selectElement.value = originalSide;
+                showToast('Failed to update side', 'error');
+            }
+        }
+    }
+}
+
+// Update visual styling of side select based on value
+function updateSideSelectStyle(selectElement, side) {
+    selectElement.classList.remove('border-blue-300', 'border-green-300', 'border-purple-300');
+    if (side === 'EAST') {
+        selectElement.classList.add('border-blue-300');
+    } else if (side === 'WEST') {
+        selectElement.classList.add('border-green-300');
+    } else {
+        selectElement.classList.add('border-purple-300');
+    }
 }
 
 // Toggle select all checkbox

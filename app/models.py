@@ -36,11 +36,12 @@ class EACMode(enum.Enum):
 class BudgetToGMP(Base):
     """Mapping from Budget rows to GMP divisions."""
     __tablename__ = "budget_to_gmp"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     budget_code = Column(String(50), index=True)
     cost_code_tier2 = Column(String(100))
     gmp_division = Column(String(200), index=True)
+    side = Column(String(4), default="BOTH", index=True)  # EAST, WEST, BOTH
     confidence = Column(Float, default=1.0)  # 0.0 to 1.0
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -54,6 +55,7 @@ class DirectToBudget(Base):
     cost_code = Column(String(50), index=True)
     name = Column(String(200))
     budget_code = Column(String(50), index=True)
+    side = Column(String(4), default="BOTH", index=True)  # EAST, WEST, BOTH
     confidence = Column(Float, default=1.0)
     method = Column(String(30), default='manual')  # manual, user_confirmed, base_code_exact, fuzzy_match, bulk_accept
     vendor_normalized = Column(String(255), nullable=True, index=True)  # For pattern matching
@@ -371,6 +373,33 @@ class ForecastAuditLog(Base):
     change_reason = Column(String(200), nullable=True)
     changed_by = Column(String(100), default="system")
     changed_at = Column(DateTime, default=datetime.utcnow)
+
+
+# =============================================================================
+# Side Configuration (East/West/Both Phase Assignment)
+# =============================================================================
+
+class SideConfiguration(Base):
+    """
+    Configuration for project sides (East/West/Both).
+    Stores timeline boundaries and allocation weights for each side.
+
+    Timeline:
+    - East: ends July 31, 2025
+    - West: starts June 1, 2025 (1-month overlap), ends July 31, 2026
+    - Both: always active, represents shared costs
+    """
+    __tablename__ = "side_configuration"
+
+    id = Column(Integer, primary_key=True, index=True)
+    side = Column(String(4), unique=True, nullable=False, index=True)  # EAST, WEST, BOTH
+    display_name = Column(String(20), nullable=False)  # East, West, Both
+    start_date = Column(DateTime, nullable=True)       # NULL = no start constraint
+    end_date = Column(DateTime, nullable=True)         # NULL = no end constraint
+    is_active = Column(Boolean, default=True, index=True)
+    allocation_weight = Column(Float, default=0.5)     # Weight for "Both" allocation split
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 def init_db():

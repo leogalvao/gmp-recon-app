@@ -279,6 +279,25 @@
             <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
                 <h1 class="text-2xl font-bold text-gray-900">GMP Reconciliation</h1>
                 <div class="flex flex-wrap items-center gap-2">
+                    <!-- Side Filter -->
+                    <div class="flex items-center gap-2 mr-2">
+                        <label class="text-sm text-gray-600">Side:</label>
+                        <select id="sideFilter" onchange="applySideFilter(this.value)" class="border rounded-lg px-3 py-1.5 text-sm">
+                            <option value="">All Sides</option>
+                            {% for s in available_sides %}
+                            <option value="{{ s.value }}" {% if side_filter == s.value %}selected{% endif %}>{{ s.label }}</option>
+                            {% endfor %}
+                        </select>
+                        {% if side_filter %}
+                        <span class="text-xs px-2 py-1 rounded-full
+                            {% if side_filter == 'EAST' %}bg-blue-100 text-blue-800
+                            {% elif side_filter == 'WEST' %}bg-green-100 text-green-800
+                            {% else %}bg-purple-100 text-purple-800{% endif %}">
+                            Filtered: {{ side_filter }}
+                        </span>
+                        {% endif %}
+                    </div>
+
                     {% if not settings.gmp_scope_confirmed %}
                     <span class="badge badge-yellow">
                         <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -292,7 +311,7 @@
                     <span class="badge badge-blue">Commitments Excluded</span>
                     {% endif %}
 
-                    <a href="/export.csv" class="btn btn-secondary text-sm">
+                    <a href="/export.csv{% if side_filter %}?side={{ side_filter }}{% endif %}" class="btn btn-secondary text-sm">
                         <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                         </svg>
@@ -664,6 +683,17 @@
 <script>
 let currentEditGmp = null;
 let currentEditTotal = 0;
+
+// Side filter - navigates to URL with side parameter
+function applySideFilter(side) {
+    const url = new URL(window.location.href);
+    if (side) {
+        url.searchParams.set('side', side);
+    } else {
+        url.searchParams.delete('side');
+    }
+    window.location.href = url.toString();
+}
 
 $(document).ready(function() {
     // Initialize DataTable
