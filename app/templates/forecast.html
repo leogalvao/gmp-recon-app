@@ -311,9 +311,14 @@
                         </a>
                         <h1 class="text-2xl font-bold text-gray-900">{{ gmp_division }}</h1>
                         <span class="badge badge-blue">Forecast</span>
+                        {% if is_project_view and forecast.division_count is defined %}
+                        <span class="badge badge-gray">{{ forecast.division_count }} division{{ 's' if forecast.division_count != 1 else '' }}</span>
+                        {% endif %}
                     </div>
                     <p class="text-gray-500 text-sm">
-                        {% if forecast.has_forecast %}
+                        {% if is_project_view %}
+                        Project-level forecast rollup
+                        {% elif forecast.has_forecast %}
                         Last updated: {{ forecast.snapshot_date[:16] | replace('T', ' ') }}
                         {% else %}
                         No forecast computed yet
@@ -321,6 +326,7 @@
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
+                    {% if not is_project_view %}
                     <a href="/api/gmp/{{ gmp_division | urlencode }}/forecast/export?format=csv&granularity={{ granularity }}"
                        class="btn btn-secondary text-sm">
                         <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -328,14 +334,36 @@
                         </svg>
                         Export
                     </a>
+                    {% endif %}
                     <button onclick="refreshForecast()" class="btn btn-primary text-sm" id="refreshBtn">
                         <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                         </svg>
-                        Refresh
+                        Refresh{% if is_project_view %} All{% endif %}
                     </button>
                 </div>
             </div>
+
+            <!-- Division Selector (Project View) -->
+            {% if all_divisions is defined and all_divisions %}
+            <div class="mb-6 p-4 bg-gray-50 rounded-lg">
+                <div class="flex flex-wrap items-center gap-4">
+                    <span class="text-sm font-medium text-gray-700">Filter by Division:</span>
+                    <div class="flex flex-wrap gap-2">
+                        <a href="/forecast"
+                           class="px-3 py-1.5 text-sm rounded-full transition-colors {% if not selected_divisions %}bg-blue-600 text-white{% else %}bg-white border border-gray-300 text-gray-700 hover:bg-gray-100{% endif %}">
+                            All Divisions
+                        </a>
+                        {% for div in all_divisions %}
+                        <a href="/forecast?divisions={{ div.name | urlencode }}"
+                           class="px-3 py-1.5 text-sm rounded-full transition-colors {% if div.name in selected_divisions %}bg-blue-600 text-white{% else %}bg-white border border-gray-300 text-gray-700 hover:bg-gray-100{% endif %}">
+                            {{ div.name }}
+                        </a>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
 
             <!-- Key Metrics -->
             {% if forecast.has_forecast %}
@@ -382,8 +410,77 @@
             {% endif %}
         </div>
 
+        <!-- Division Breakdown Table (Project View) -->
+        {% if is_project_view and forecast.divisions is defined and forecast.divisions %}
+        <div class="card">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Division Breakdown</h2>
+            <div class="overflow-x-auto">
+                <table class="min-w-full">
+                    <thead>
+                        <tr class="border-b">
+                            <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Division</th>
+                            <th class="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase">BAC</th>
+                            <th class="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase">AC</th>
+                            <th class="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase">EAC</th>
+                            <th class="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase">Variance</th>
+                            <th class="text-center py-3 px-4 text-xs font-medium text-gray-500 uppercase">CPI</th>
+                            <th class="text-center py-3 px-4 text-xs font-medium text-gray-500 uppercase">Method</th>
+                            <th class="text-center py-3 px-4 text-xs font-medium text-gray-500 uppercase">Confidence</th>
+                            <th class="text-center py-3 px-4 text-xs font-medium text-gray-500 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for div in forecast.divisions %}
+                        <tr class="border-b hover:bg-gray-50">
+                            <td class="py-3 px-4 font-medium text-gray-900">{{ div.gmp_division }}</td>
+                            <td class="py-3 px-4 text-right text-gray-700">{{ div.bac_display }}</td>
+                            <td class="py-3 px-4 text-right text-gray-700">{{ div.ac_display }}</td>
+                            <td class="py-3 px-4 text-right text-gray-700">{{ div.eac_display }}</td>
+                            <td class="py-3 px-4 text-right {% if div.var_cents > 0 %}text-green-600{% elif div.var_cents < 0 %}text-red-600{% else %}text-gray-500{% endif %}">
+                                {{ div.var_display }}
+                            </td>
+                            <td class="py-3 px-4 text-center {% if div.cpi and div.cpi >= 1 %}text-green-600{% elif div.cpi %}text-red-600{% endif %}">
+                                {{ div.cpi if div.cpi else '-' }}
+                            </td>
+                            <td class="py-3 px-4 text-center">
+                                <span class="badge badge-blue">{{ div.method | upper }}</span>
+                            </td>
+                            <td class="py-3 px-4 text-center">
+                                <span class="badge {% if div.confidence_band == 'high' %}badge-green{% elif div.confidence_band == 'medium' %}badge-yellow{% else %}badge-red{% endif %}">
+                                    {{ div.confidence_band | capitalize if div.confidence_band else '-' }}
+                                </span>
+                            </td>
+                            <td class="py-3 px-4 text-center">
+                                <a href="/gmp/{{ div.gmp_division | urlencode }}/forecast"
+                                   class="text-blue-600 hover:text-blue-800 text-sm font-medium">
+                                    View Details
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr class="bg-gray-50 font-semibold">
+                            <td class="py-3 px-4 text-gray-900">Total</td>
+                            <td class="py-3 px-4 text-right text-gray-900">{{ forecast.bac_display }}</td>
+                            <td class="py-3 px-4 text-right text-gray-900">{{ forecast.ac_display }}</td>
+                            <td class="py-3 px-4 text-right text-gray-900">{{ forecast.eac_display }}</td>
+                            <td class="py-3 px-4 text-right {% if forecast.var_cents > 0 %}text-green-600{% elif forecast.var_cents < 0 %}text-red-600{% else %}text-gray-500{% endif %}">
+                                {{ forecast.var_display }}
+                            </td>
+                            <td class="py-3 px-4 text-center">-</td>
+                            <td class="py-3 px-4 text-center">-</td>
+                            <td class="py-3 px-4 text-center">-</td>
+                            <td class="py-3 px-4 text-center">-</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Chart -->
-        {% if forecast.has_forecast %}
+        {% if forecast.has_forecast and not is_project_view %}
         <div class="card">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-lg font-semibold text-gray-900">Forecast Timeline</h2>
@@ -748,6 +845,7 @@
 {% block extra_scripts %}
 <script>
 const gmpDivision = "{{ gmp_division }}";
+const isProjectView = {{ 'true' if is_project_view else 'false' }};
 let currentGranularity = "{{ granularity }}";
 let selectedMethod = "{{ config.method }}";
 
@@ -862,7 +960,12 @@ async function refreshForecast() {
     btn.innerHTML = '<svg class="w-4 h-4 inline mr-1 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Refreshing...';
 
     try {
-        const response = await fetch(`/api/gmp/${encodeURIComponent(gmpDivision)}/forecast/refresh`, {
+        // Use project refresh API for project view, division API otherwise
+        const url = isProjectView
+            ? '/api/project/forecast/refresh-all'
+            : `/api/gmp/${encodeURIComponent(gmpDivision)}/forecast/refresh`;
+
+        const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });

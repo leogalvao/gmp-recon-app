@@ -269,6 +269,110 @@ async def gmp_page(request: Request, db: Session = Depends(get_db)):
         })
 
 
+@app.get("/forecast", response_class=HTMLResponse)
+async def forecast_project_page(
+    request: Request,
+    divisions: str = None,
+    granularity: str = "weekly",
+    db: Session = Depends(get_db)
+):
+    """Project-level forecast page with optional division filtering."""
+    from urllib.parse import unquote
+
+    # Get all available divisions from config
+    app_config = get_config()
+    all_divisions = []
+    for key, div_config in app_config.gmp_divisions.items():
+        all_divisions.append({
+            'key': key,
+            'name': div_config.get('name', key)
+        })
+    all_divisions.sort(key=lambda x: x['name'])
+
+    # Parse selected divisions
+    selected_divisions = []
+    if divisions:
+        selected_divisions = [unquote(d.strip()) for d in divisions.split(',') if d.strip()]
+
+    # Validate granularity
+    if granularity not in ['weekly', 'monthly']:
+        granularity = 'weekly'
+
+    # Get project rollup
+    manager = ForecastManager(db)
+    rollup = compute_project_rollup(db)
+
+    # Filter by selected divisions if specified
+    division_forecasts = rollup.get('by_division', [])
+    if selected_divisions:
+        division_forecasts = [d for d in division_forecasts if d['gmp_division'] in selected_divisions]
+
+    # Calculate filtered totals
+    if selected_divisions and division_forecasts:
+        total_bac = sum(d.get('bac_cents', 0) or 0 for d in division_forecasts)
+        total_ac = sum(d.get('ac_cents', 0) or 0 for d in division_forecasts)
+        total_eac = sum(d.get('eac_cents', 0) or 0 for d in division_forecasts)
+        total_etc = sum(d.get('etc_cents', 0) or 0 for d in division_forecasts)
+        total_var = sum(d.get('var_cents', 0) or 0 for d in division_forecasts)
+    else:
+        total_bac = rollup.get('total_bac_cents', 0)
+        total_ac = rollup.get('total_ac_cents', 0)
+        total_eac = rollup.get('total_eac_cents', 0)
+        total_etc = rollup.get('total_etc_cents', 0)
+        total_var = rollup.get('total_var_cents', 0)
+
+    # Build project forecast dict
+    forecast = {
+        'has_forecast': len(division_forecasts) > 0,
+        'is_project_view': True,
+        'bac_cents': total_bac,
+        'bac_display': cents_to_display(total_bac),
+        'ac_cents': total_ac,
+        'ac_display': cents_to_display(total_ac),
+        'eac_cents': total_eac,
+        'eac_display': cents_to_display(total_eac),
+        'eac_west_cents': total_eac // 2 if total_eac else 0,
+        'eac_east_cents': total_eac - (total_eac // 2) if total_eac else 0,
+        'etc_cents': total_etc,
+        'etc_display': cents_to_display(total_etc),
+        'var_cents': total_var,
+        'var_display': cents_to_display(total_var),
+        'var_percent': round(total_var / total_bac * 100, 1) if total_bac else 0,
+        'percent_complete': round(total_ac / total_eac * 100, 1) if total_eac else 0,
+        'cpi': rollup.get('overall_cpi'),
+        'spi': None,
+        'method': 'rollup',
+        'confidence_score': 0.7,
+        'confidence_band': 'medium',
+        'explanation': 'Project-level rollup of all division forecasts',
+        'trigger': 'manual',
+        'snapshot_date': None,
+        'division_count': len(division_forecasts),
+        'divisions': division_forecasts
+    }
+
+    # Config for project view
+    config_dict = {
+        'method': 'rollup',
+        'distribution_method': 'linear',
+        'completion_date': None,
+        'is_locked': False
+    }
+
+    return templates.TemplateResponse("forecast.html", {
+        "request": request,
+        "gmp_division": "All Divisions" if not selected_divisions else ", ".join(selected_divisions),
+        "granularity": granularity,
+        "forecast": forecast,
+        "config": config_dict,
+        "periods": {'periods': [], 'period_count': 0},
+        "all_divisions": all_divisions,
+        "selected_divisions": selected_divisions,
+        "is_project_view": True,
+        "active_page": "forecast"
+    })
+
+
 @app.get("/gmp/{gmp_division}/forecast", response_class=HTMLResponse)
 async def forecast_page(
     request: Request,
