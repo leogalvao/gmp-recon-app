@@ -224,15 +224,45 @@
         border: 1px solid #e2e8f0;
         border-radius: 8px;
         padding: 1rem;
-        font-size: 0.875rem;
-        line-height: 1.6;
+        font-size: 0.8125rem;
+        line-height: 1.7;
         color: #475569;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+        hyphens: auto;
+    }
+
+    /* Sidebar label/value pairs - prevent overlap */
+    .sidebar-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        column-gap: 12px;
+        row-gap: 6px;
+        align-items: baseline;
+    }
+
+    .sidebar-row .label {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        color: #4b5563;
+    }
+
+    .sidebar-row .value {
+        white-space: nowrap;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-weight: 500;
     }
 
     /* Sidebar */
     .forecast-sidebar .card {
         position: sticky;
         top: 80px;
+    }
+
+    .forecast-sidebar {
+        min-width: 280px;
+        max-width: 360px;
     }
 
     /* Period scroll container */
@@ -610,33 +640,31 @@
             <h3 class="font-semibold text-gray-900 mb-4">Cost Distribution</h3>
 
             <div class="space-y-3">
-                <div>
-                    <div class="flex justify-between text-sm mb-1">
-                        <span class="text-gray-600">Method</span>
-                        <span class="font-medium">{{ config.distribution_method | default('linear') | capitalize }}</span>
-                    </div>
+                <div class="sidebar-row text-sm">
+                    <span class="label">Method</span>
+                    <span class="value">{{ config.distribution_method | default('linear') | capitalize }}</span>
                 </div>
 
                 {% if forecast.has_forecast %}
                 <div class="pt-3 border-t">
                     <div class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Regional Split</div>
                     <div class="space-y-2">
-                        <div class="flex justify-between text-sm">
-                            <span class="text-gray-600">West</span>
-                            <span class="font-medium">${{ "{:,.0f}".format((forecast.eac_west_cents / 100) | int) if forecast.eac_cents else '-' }}</span>
+                        <div class="sidebar-row text-sm">
+                            <span class="label">West</span>
+                            <span class="value">${{ "{:,.0f}".format((forecast.eac_west_cents / 100) | int) if forecast.eac_cents else '-' }}</span>
                         </div>
-                        <div class="flex justify-between text-sm">
-                            <span class="text-gray-600">East</span>
-                            <span class="font-medium">${{ "{:,.0f}".format((forecast.eac_east_cents / 100) | int) if forecast.eac_cents else '-' }}</span>
+                        <div class="sidebar-row text-sm">
+                            <span class="label">East</span>
+                            <span class="value">${{ "{:,.0f}".format((forecast.eac_east_cents / 100) | int) if forecast.eac_cents else '-' }}</span>
                         </div>
                     </div>
                 </div>
                 {% endif %}
 
                 <div class="pt-3 border-t">
-                    <div class="flex justify-between text-sm mb-1">
-                        <span class="text-gray-600">Completion Date</span>
-                        <span class="font-medium">{{ config.completion_date[:10] if config.completion_date else 'Auto' }}</span>
+                    <div class="sidebar-row text-sm mb-2">
+                        <span class="label">Completion Date</span>
+                        <span class="value">{{ config.completion_date[:10] if config.completion_date else 'Auto' }}</span>
                     </div>
                     <button onclick="openSettingsModal()" class="text-blue-600 text-sm hover:underline">
                         Edit Settings
@@ -861,7 +889,10 @@ const chartData = {
             borderColor: '#6b7280',
             backgroundColor: 'rgba(107, 114, 128, 0.1)',
             fill: true,
-            tension: 0.3
+            tension: 0.4,
+            cubicInterpolationMode: 'monotone',
+            pointRadius: 3,
+            pointHoverRadius: 5
         },
         {
             label: 'Forecast',
@@ -870,7 +901,10 @@ const chartData = {
             backgroundColor: 'rgba(59, 130, 246, 0.1)',
             borderDash: [5, 5],
             fill: true,
-            tension: 0.3
+            tension: 0.4,
+            cubicInterpolationMode: 'monotone',
+            pointRadius: 3,
+            pointHoverRadius: 5
         },
         {
             label: 'Cumulative',
@@ -878,7 +912,10 @@ const chartData = {
             borderColor: '#10b981',
             backgroundColor: 'transparent',
             fill: false,
-            tension: 0.3,
+            tension: 0.4,
+            cubicInterpolationMode: 'monotone',
+            pointRadius: 2,
+            pointHoverRadius: 4,
             yAxisID: 'y1'
         }
     ]
