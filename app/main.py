@@ -415,8 +415,8 @@ async def mappings_page(request: Request, tab: str = "budget_to_gmp", db: Sessio
                 'description': desc,
                 'display': f"{bc} – {desc[:40]}..." if len(desc) > 40 else f"{bc} – {desc}" if desc else f"{bc} – (No description)"
             })
-    # Sort alphabetically by code
-    budget_options.sort(key=lambda x: x['code'])
+    # Sort alphabetically by code (convert to string to handle mixed types)
+    budget_options.sort(key=lambda x: str(x['code']) if x['code'] is not None else '')
 
     # Build lookup for budget descriptions
     budget_desc_lookup = {}
