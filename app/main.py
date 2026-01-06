@@ -737,7 +737,7 @@ async def mappings_page(
 
     # Build ALL direct cost items list (both mapped and unmapped)
     all_direct_items = []
-    display_columns = ['Cost Code', 'Name', 'Vendor', 'Invoice', 'Date', 'Amount', 'Type']
+    display_columns = ['Cost Code', 'Name', 'Vendor', 'Invoice #', 'Date', 'Amount', 'Type', 'Description']
 
     for _, row in data_loader.direct_costs.iterrows():
         dc_id = row.get('direct_cost_id', 0)
@@ -1908,7 +1908,7 @@ async def get_direct_cost_items(
 
     # Build all items list
     all_items = []
-    display_columns = ['Cost Code', 'Name', 'Vendor', 'Invoice', 'Date', 'Amount', 'Type']
+    display_columns = ['Cost Code', 'Name', 'Vendor', 'Invoice #', 'Date', 'Amount', 'Type', 'Description']
 
     for _, row in direct_df.iterrows():
         dc_id = row.get('direct_cost_id', 0)
