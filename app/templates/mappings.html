@@ -232,41 +232,110 @@
     </div>
 
     {% elif active_tab == 'direct_to_budget' %}
-    <!-- Direct Cost to Budget Mapping - Unified Table UI -->
+    <!-- Direct Cost to Budget Mapping - Unified Table UI (API-driven) -->
     <div class="space-y-6">
-        <!-- Search/Filter Controls -->
-        <div class="flex flex-wrap gap-4 items-center">
-            <div class="flex-1 min-w-64">
-                <input type="text" id="searchDirect" placeholder="Search by vendor, cost code, name..."
-                    class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    onkeyup="filterDirectTable(this.value)">
-            </div>
-            <div class="flex items-center gap-2">
-                <label class="text-sm text-gray-600">Side:</label>
-                <select id="filterDirectSide" onchange="applySideFilter(this.value)" class="border rounded-lg px-3 py-2">
-                    <option value="">All Sides</option>
-                    {% for s in available_sides %}
-                    <option value="{{ s.value }}" {% if side_filter == s.value %}selected{% endif %}>{{ s.label }}</option>
-                    {% endfor %}
+        <!-- Search/Filter Controls - Sticky -->
+        <div id="directFilterBar" class="sticky top-0 z-20 bg-white -mx-6 px-6 py-3 border-b shadow-sm">
+            <!-- Row 1: Search + Status Segmented Control -->
+            <div class="flex flex-wrap gap-3 items-center mb-3">
+                <div class="flex-1 min-w-52 max-w-md">
+                    <div class="relative">
+                        <input type="text" id="searchDirect" placeholder="Search vendor, code, name..."
+                            class="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                            aria-label="Search direct costs">
+                        <svg class="absolute left-3 top-2.5 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Status Segmented Control -->
+                <div id="statusSegmentedControl" class="flex bg-gray-100 rounded-lg p-1">
+                    <button type="button" data-status="unmapped" class="status-seg-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors active bg-white shadow-sm text-gray-900">
+                        Unmapped <span class="status-count ml-1 text-xs text-gray-500" id="countUnmapped"></span>
+                    </button>
+                    <button type="button" data-status="needs_review" class="status-seg-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors text-gray-600 hover:text-gray-900">
+                        Needs Review <span class="status-count ml-1 text-xs text-gray-500" id="countNeedsReview"></span>
+                    </button>
+                    <button type="button" data-status="mapped" class="status-seg-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors text-gray-600 hover:text-gray-900">
+                        Mapped <span class="status-count ml-1 text-xs text-gray-500" id="countMapped"></span>
+                    </button>
+                    <button type="button" data-status="all" class="status-seg-btn px-3 py-1.5 text-sm font-medium rounded-md transition-colors text-gray-600 hover:text-gray-900">
+                        All
+                    </button>
+                </div>
+
+                <!-- Hidden select for backwards compatibility -->
+                <select id="filterDirectStatus" class="hidden">
+                    <option value="unmapped">Unmapped</option>
+                    <option value="needs_review">Needs Review</option>
+                    <option value="mapped">Mapped</option>
+                    <option value="all">All Items</option>
                 </select>
             </div>
-            <div class="flex items-center gap-2">
-                <label class="text-sm text-gray-600">Show:</label>
-                <select id="filterDirectStatus" onchange="filterDirectByStatus(this.value)" class="border rounded-lg px-3 py-2">
-                    <option value="all">All Items ({{ total_direct }})</option>
-                    <option value="unmapped" selected>Unmapped Only ({{ unmapped_direct|length }})</option>
-                    <option value="mapped">Mapped Only ({{ mapped_direct|length }})</option>
-                </select>
-            </div>
-            <div class="flex items-center gap-2">
-                <label class="text-sm text-gray-600">Type:</label>
-                <select id="filterType" onchange="filterByType(this.value)" class="border rounded-lg px-3 py-2">
-                    <option value="all">All Types</option>
-                    <option value="L">Labor</option>
-                    <option value="M">Material</option>
-                    <option value="S">Subcontract</option>
-                    <option value="O">Other</option>
-                </select>
+
+            <!-- Row 2: Additional Filters + Density Toggle -->
+            <div class="flex flex-wrap gap-3 items-center">
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-gray-600">Confidence:</label>
+                    <select id="filterBand" class="border rounded-lg px-3 py-2 text-sm">
+                        <option value="">All</option>
+                        <option value="high">High (≥85%)</option>
+                        <option value="medium">Medium (60-84%)</option>
+                        <option value="low">Low (&lt;60%)</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-gray-600">Side:</label>
+                    <select id="filterDirectSide" class="border rounded-lg px-3 py-2 text-sm">
+                        <option value="">All Sides</option>
+                        {% for s in available_sides %}
+                        <option value="{{ s.value }}" {% if side_filter == s.value %}selected{% endif %}>{{ s.label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-gray-600">Type:</label>
+                    <select id="filterType" class="border rounded-lg px-3 py-2 text-sm">
+                        <option value="">All Types</option>
+                        <option value="L">Labor</option>
+                        <option value="M">Material</option>
+                        <option value="S">Subcontract</option>
+                        <option value="O">Other</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-gray-600">Sort:</label>
+                    <select id="sortDirect" class="border rounded-lg px-3 py-2 text-sm">
+                        <option value="confidence_desc">Confidence ↓</option>
+                        <option value="amount_desc">Amount ↓</option>
+                        <option value="date_desc">Date ↓</option>
+                        <option value="vendor_asc">Vendor A-Z</option>
+                        <option value="cost_code_asc">Cost Code</option>
+                    </select>
+                </div>
+
+                <!-- Spacer -->
+                <div class="flex-1"></div>
+
+                <!-- Density Toggle -->
+                <div class="flex items-center gap-1 border rounded-lg p-1">
+                    <button type="button" id="densityComfortable" class="density-btn p-1.5 rounded text-gray-500 hover:bg-gray-100 active bg-gray-100 text-gray-900" title="Comfortable density" data-density="comfortable">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                        </svg>
+                    </button>
+                    <button type="button" id="densityCompact" class="density-btn p-1.5 rounded text-gray-500 hover:bg-gray-100" title="Compact density" data-density="compact">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
+                        </svg>
+                    </button>
+                    <button type="button" id="densityUltra" class="density-btn p-1.5 rounded text-gray-500 hover:bg-gray-100" title="Ultra-compact density" data-density="ultra">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 5h16M4 8h16M4 11h16M4 14h16M4 17h16M4 20h16"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -288,38 +357,37 @@
             <span class="text-gray-400 ml-2">(darker = higher score)</span>
         </div>
 
-        <!-- Progress Stats -->
-        <div class="grid grid-cols-5 gap-4 text-center">
+        <!-- Progress Stats (dynamically updated) -->
+        <div class="grid grid-cols-5 gap-4 text-center" id="directStatsContainer">
             <div class="bg-blue-50 rounded-lg p-3">
-                <div class="text-2xl font-bold text-blue-600">{{ total_direct }}</div>
+                <div class="text-2xl font-bold text-blue-600" id="statTotal">-</div>
                 <div class="text-sm text-blue-700">Total Items</div>
             </div>
             <div class="bg-green-50 rounded-lg p-3 border-2 border-green-200">
-                <div class="text-2xl font-bold text-green-600">{{ mapped_direct|length }}</div>
+                <div class="text-2xl font-bold text-green-600" id="statMapped">-</div>
                 <div class="text-sm text-green-700">Mapped</div>
             </div>
-            <div class="bg-emerald-50 rounded-lg p-3">
-                <div class="text-2xl font-bold text-emerald-600">{{ direct_high|default(0) }}</div>
+            <div class="bg-emerald-50 rounded-lg p-3 cursor-pointer hover:ring-2 hover:ring-emerald-400" onclick="setConfidenceFilter('high')">
+                <div class="text-2xl font-bold text-emerald-600" id="statHigh">-</div>
                 <div class="text-sm text-emerald-700">High Conf.</div>
                 <div class="text-xs text-emerald-500">≥85%</div>
             </div>
-            <div class="bg-yellow-50 rounded-lg p-3">
-                <div class="text-2xl font-bold text-yellow-600">{{ direct_medium|default(0) }}</div>
+            <div class="bg-yellow-50 rounded-lg p-3 cursor-pointer hover:ring-2 hover:ring-yellow-400" onclick="setConfidenceFilter('medium')">
+                <div class="text-2xl font-bold text-yellow-600" id="statMedium">-</div>
                 <div class="text-sm text-yellow-700">Medium</div>
                 <div class="text-xs text-yellow-500">60-84%</div>
             </div>
-            <div class="bg-red-50 rounded-lg p-3">
-                <div class="text-2xl font-bold text-red-600">{{ direct_low|default(0) }}</div>
+            <div class="bg-red-50 rounded-lg p-3 cursor-pointer hover:ring-2 hover:ring-red-400" onclick="setConfidenceFilter('low')">
+                <div class="text-2xl font-bold text-red-600" id="statLow">-</div>
                 <div class="text-sm text-red-700">Needs Review</div>
                 <div class="text-xs text-red-500">&lt;60%</div>
             </div>
         </div>
 
-        <!-- Bulk Actions -->
-        {% if direct_high|default(0) > 0 %}
-        <div class="bg-green-50 border border-green-200 rounded-lg p-4 flex justify-between items-center">
+        <!-- Bulk Actions (shown when high-confidence items exist) -->
+        <div id="bulkActionsContainer" class="bg-green-50 border border-green-200 rounded-lg p-4 flex justify-between items-center hidden">
             <div>
-                <span class="font-medium text-green-800">{{ direct_high }} items ready for bulk accept</span>
+                <span class="font-medium text-green-800"><span id="bulkHighCount">0</span> items ready for bulk accept</span>
                 <p class="text-sm text-green-600">High-confidence matches (≥85%) can be accepted automatically.</p>
             </div>
             <button onclick="bulkAcceptHighConfidence()" id="bulkAcceptBtn"
@@ -330,13 +398,41 @@
                 Accept All High-Confidence
             </button>
         </div>
-        {% endif %}
 
-        <!-- Unified Mapping Table -->
-        <div class="border rounded-lg overflow-hidden max-h-[600px] overflow-y-auto">
+        <!-- Two-Pane Layout: Table + Details Drawer -->
+        <div id="directTwoPaneContainer" class="flex gap-0 h-[calc(100vh-380px)] min-h-[450px]">
+            <!-- Main Table Pane -->
+            <div id="directTableContainer" class="flex-1 border rounded-lg overflow-hidden overflow-y-auto relative transition-all duration-300">
+            <!-- Loading Skeleton -->
+            <div id="directTableSkeleton" class="absolute inset-0 bg-white z-10">
+                <div class="animate-pulse">
+                    <div class="h-12 bg-gray-100 border-b"></div>
+                    {% for i in range(10) %}
+                    <div class="flex border-b py-3 px-3 gap-3">
+                        <div class="h-4 bg-gray-200 rounded w-24"></div>
+                        <div class="h-4 bg-gray-200 rounded w-20"></div>
+                        <div class="h-4 bg-gray-200 rounded w-32"></div>
+                        <div class="h-4 bg-gray-200 rounded w-16"></div>
+                        <div class="h-4 bg-gray-200 rounded w-20"></div>
+                        <div class="h-4 bg-gray-200 rounded w-28"></div>
+                        <div class="h-4 bg-gray-200 rounded w-16"></div>
+                        <div class="h-6 bg-gray-200 rounded-full w-6"></div>
+                        <div class="h-4 bg-gray-200 rounded flex-1"></div>
+                        <div class="h-4 bg-gray-200 rounded w-12"></div>
+                        <div class="h-4 bg-gray-200 rounded w-16"></div>
+                        <div class="h-6 bg-gray-200 rounded w-16"></div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
             <table class="w-full text-sm" id="directTable">
-                <thead class="bg-gray-50 sticky top-0">
+                <thead class="bg-gray-50 sticky top-0 z-5">
                     <tr>
+                        <th class="px-2 py-3 text-center w-10">
+                            <input type="checkbox" id="selectAllRows" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                   onclick="toggleSelectAll(this.checked)" title="Select all visible rows">
+                        </th>
                         <th class="px-3 py-3 text-left font-semibold text-gray-700">Vendor</th>
                         <th class="px-3 py-3 text-left font-semibold text-gray-700 w-28">Cost Code</th>
                         <th class="px-3 py-3 text-left font-semibold text-gray-700">Name</th>
@@ -352,317 +448,272 @@
                     </tr>
                 </thead>
                 <tbody class="divide-y" id="directTableBody">
-                    <!-- Unmapped Items -->
-                    {% for item in unmapped_direct %}
-                    {% set conf_band = item.get('confidence_band', 'low') %}
-                    {% set top_sugg = item.get('top_suggestion') %}
-                    <tr class="hover:bg-blue-50 transition-colors {% if conf_band == 'high' %}bg-green-50{% elif conf_band == 'medium' %}bg-yellow-50{% endif %}"
-                        data-status="unmapped"
-                        data-dc-id="{{ item.get('direct_cost_id', '') }}"
-                        data-code="{{ item.get('Cost Code', '') }}"
-                        data-name="{{ item.get('Name', '') }}"
-                        data-vendor="{{ item.get('Vendor', '') }}"
-                        data-type="{{ item.get('Type', '') }}"
-                        data-confidence="{{ item.get('confidence', 0) }}"
-                        data-band="{{ conf_band }}">
-                        {% set vendor_val = item.get('Vendor', '') %}
-                        {% set vendor_str = vendor_val if vendor_val is string and vendor_val == vendor_val else '' %}
-                        <td class="px-3 py-2 text-gray-600 max-w-32 truncate" title="{{ vendor_str }}">
-                            {{ (vendor_str or 'N/A')[:20] }}
-                        </td>
-                        <td class="px-3 py-2">
-                            <span class="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{{ item.get('Cost Code', '') }}</span>
-                        </td>
-                        <td class="px-3 py-2 text-gray-600">
-                            {% set name_val = item.get('Name', '') %}
-                            {% set name_str = name_val if name_val is string and name_val == name_val else '' %}
-                            <span class="truncate block max-w-48" title="{{ name_str }}">
-                                {{ (name_str or 'N/A')[:35] }}{% if name_str|length > 35 %}...{% endif %}
-                            </span>
-                        </td>
-                        <td class="px-3 py-2 text-center text-xs text-gray-500">
-                            {% set date_val = item.get('Date', '') %}
-                            {{ date_val[:10] if date_val else '-' }}
-                        </td>
-                        <td class="px-3 py-2 text-gray-600">
-                            {% set invoice_val = item.get('Invoice #', '') %}
-                            {% set invoice_str = invoice_val if invoice_val is string and invoice_val == invoice_val else '' %}
-                            <span class="font-mono text-xs truncate block max-w-24" title="{{ invoice_str }}">
-                                {{ (invoice_str or '-')[:12] }}{% if invoice_str|length > 12 %}...{% endif %}
-                            </span>
-                        </td>
-                        <td class="px-3 py-2 text-gray-500 text-xs">
-                            {% set desc_val = item.get('Description', '') %}
-                            {% set desc_str = desc_val if desc_val is string and desc_val == desc_val else '' %}
-                            <span class="truncate block max-w-40" title="{{ desc_str }}">
-                                {{ (desc_str or '-')[:30] }}{% if desc_str|length > 30 %}...{% endif %}
-                            </span>
-                        </td>
-                        <td class="px-3 py-2 text-right font-mono text-sm">{{ item.get('Amount', '') }}</td>
-                        <td class="px-3 py-2 text-center">
-                            {% set type_code = item.get('Type', '') %}
-                            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold
-                                {% if type_code == 'L' %}bg-blue-100 text-blue-700
-                                {% elif type_code == 'M' %}bg-purple-100 text-purple-700
-                                {% elif type_code == 'S' %}bg-orange-100 text-orange-700
-                                {% else %}bg-gray-100 text-gray-700{% endif %}">
-                                {{ type_code or '?' }}
-                            </span>
-                        </td>
-                        <td class="px-3 py-2">
-                            <div class="flex items-center gap-2">
-                                {% if top_sugg %}
-                                {% set bd = top_sugg.get('breakdown', {}) %}
-                                <div class="score-breakdown-inline shrink-0 cursor-help"
-                                     title="Code: {{ (bd.get('code_match', 0) * 100)|int }}% | Type: {{ (bd.get('type_match', 0) * 100)|int }}% | Text: {{ (bd.get('text_sim', 0) * 100)|int }}% | History: {{ (bd.get('historical', 0) * 100)|int }}%">
-                                    <div class="flex items-center gap-1">
-                                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold shrink-0
-                                            {% if conf_band == 'high' %}bg-green-100 text-green-800
-                                            {% elif conf_band == 'medium' %}bg-yellow-100 text-yellow-800
-                                            {% else %}bg-gray-100 text-gray-600{% endif %}">
-                                            {{ item.get('confidence', 0)|int }}%
-                                        </span>
-                                        <div class="flex gap-0.5 items-center" title="Score breakdown: Code | Type | Text | History">
-                                            <div class="w-1.5 h-3 rounded-sm {% if bd.get('code_match', 0) >= 0.8 %}bg-blue-500{% elif bd.get('code_match', 0) >= 0.4 %}bg-blue-300{% else %}bg-blue-100{% endif %}"
-                                                 title="Code: {{ (bd.get('code_match', 0) * 100)|int }}%"></div>
-                                            <div class="w-1.5 h-3 rounded-sm {% if bd.get('type_match', 0) >= 0.8 %}bg-purple-500{% elif bd.get('type_match', 0) >= 0.4 %}bg-purple-300{% else %}bg-purple-100{% endif %}"
-                                                 title="Type: {{ (bd.get('type_match', 0) * 100)|int }}%"></div>
-                                            <div class="w-1.5 h-3 rounded-sm {% if bd.get('text_sim', 0) >= 0.8 %}bg-green-500{% elif bd.get('text_sim', 0) >= 0.4 %}bg-green-300{% else %}bg-green-100{% endif %}"
-                                                 title="Text: {{ (bd.get('text_sim', 0) * 100)|int }}%"></div>
-                                            <div class="w-1.5 h-3 rounded-sm {% if bd.get('historical', 0) >= 0.8 %}bg-orange-500{% elif bd.get('historical', 0) >= 0.4 %}bg-orange-300{% else %}bg-orange-100{% endif %}"
-                                                 title="History: {{ (bd.get('historical', 0) * 100)|int }}%"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                                {% else %}
-                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 shrink-0">
-                                    Manual
-                                </span>
-                                {% endif %}
-                                <select class="budget-select flex-1 border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 min-w-80
-                                    {% if conf_band == 'high' %}border-green-300{% elif conf_band == 'medium' %}border-yellow-300{% elif not top_sugg %}border-red-300{% endif %}"
-                                        data-dc-id="{{ item.get('direct_cost_id', '') }}"
-                                        data-cost-code="{{ item.get('Cost Code', '') }}"
-                                        data-name="{{ item.get('Name', '') }}"
-                                        data-vendor="{{ item.get('Vendor', '') }}"
-                                        data-suggested="{{ top_sugg.get('budget_code', '') if top_sugg else '' }}"
-                                        data-score="{{ item.get('confidence', 0) }}"
-                                        data-original=""
-                                        onchange="enableSaveButton(this)"
-                                        aria-label="Select budget code">
-                                    <option value="">-- Select Budget --</option>
-                                    {% if top_sugg %}
-                                    {% set sugg_desc = top_sugg.get('description', '') %}
-                                    {% set sugg_desc_display = sugg_desc[:35] ~ '...' if sugg_desc|length > 35 else sugg_desc %}
-                                    <option value="{{ top_sugg.get('budget_code', '') }}" selected class="font-medium" title="{{ sugg_desc }}">
-                                        ★ {{ top_sugg.get('budget_code', '') }} – {{ sugg_desc_display or '(No description)' }} ({{ top_sugg.get('score', 0)|int }}%)
-                                    </option>
-                                    {% for sugg in item.get('suggestions', [])[1:] %}
-                                    {% set alt_desc = sugg.get('description', '') %}
-                                    {% set alt_desc_display = alt_desc[:30] ~ '...' if alt_desc|length > 30 else alt_desc %}
-                                    <option value="{{ sugg.get('budget_code', '') }}" title="{{ alt_desc }}">
-                                        {{ sugg.get('budget_code', '') }} – {{ alt_desc_display or '(No desc)' }} ({{ sugg.get('score', 0)|int }}%)
-                                    </option>
-                                    {% endfor %}
-                                    <option disabled>──────────</option>
-                                    {% endif %}
-                                    {% for bc in budget_options %}
-                                    {% if not top_sugg or bc.code != top_sugg.get('budget_code', '') %}
-                                    <option value="{{ bc.code }}" title="{{ bc.description }}">{{ bc.display }}</option>
-                                    {% endif %}
-                                    {% endfor %}
-                                </select>
-                                {% if top_sugg %}
-                                <button onclick="showScoreBreakdown({{ item.get('direct_cost_id', 0) }})"
-                                        class="text-gray-400 hover:text-blue-600 shrink-0" title="View score breakdown">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                    </svg>
-                                </button>
-                                {% endif %}
-                            </div>
-                        </td>
-                        <td class="px-3 py-2 text-center">
-                            <select class="side-select border rounded px-1 py-0.5 text-xs"
-                                    data-dc-id="{{ item.get('direct_cost_id', '') }}"
-                                    data-cost-code="{{ item.get('Cost Code', '') }}"
-                                    data-name="{{ item.get('Name', '') }}">
-                                <option value="BOTH" selected>Both</option>
-                                <option value="EAST">East</option>
-                                <option value="WEST">West</option>
-                            </select>
-                        </td>
-                        <td class="px-3 py-2 text-center">
-                            <span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">unmapped</span>
-                        </td>
-                        <td class="px-3 py-2 text-center">
-                            <div class="flex gap-1 justify-center">
-                                {% if conf_band == 'high' and top_sugg %}
-                                <button onclick="quickAccept(this)"
-                                        class="quick-accept-btn px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors flex items-center gap-1"
-                                        title="Accept {{ top_sugg.get('budget_code', '') }} ({{ item.get('confidence', 0)|int }}%)"
-                                        data-budget-code="{{ top_sugg.get('budget_code', '') }}">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                    </svg>
-                                    Accept
-                                </button>
-                                {% else %}
-                                <button onclick="saveDirectMapping(this)"
-                                        class="save-btn px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                                        {% if not top_sugg %}disabled{% endif %}>
-                                    Save
-                                </button>
-                                {% endif %}
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-
-                    <!-- Mapped Items -->
-                    {% for item in mapped_direct %}
-                    <tr class="bg-green-50 hover:bg-green-100 transition-colors"
-                        data-status="mapped"
-                        data-dc-id="{{ item.get('direct_cost_id', '') }}"
-                        data-code="{{ item.get('Cost Code', '') }}"
-                        data-name="{{ item.get('Name', '') }}"
-                        data-vendor="{{ item.get('Vendor', '') }}"
-                        data-type="{{ item.get('Type', '') }}"
-                        data-band="mapped">
-                        {% set vendor_val = item.get('Vendor', '') %}
-                        {% set vendor_str = vendor_val if vendor_val is string and vendor_val == vendor_val else '' %}
-                        <td class="px-3 py-2 text-gray-600 max-w-32 truncate" title="{{ vendor_str }}">
-                            {{ (vendor_str or 'N/A')[:20] }}
-                        </td>
-                        <td class="px-3 py-2">
-                            <span class="font-mono text-xs bg-green-200 px-1.5 py-0.5 rounded">{{ item.get('Cost Code', '') }}</span>
-                        </td>
-                        <td class="px-3 py-2 text-gray-600">
-                            {% set name_val = item.get('Name', '') %}
-                            {% set name_str = name_val if name_val is string and name_val == name_val else '' %}
-                            <span class="truncate block max-w-48" title="{{ name_str }}">
-                                {{ (name_str or 'N/A')[:35] }}{% if name_str|length > 35 %}...{% endif %}
-                            </span>
-                        </td>
-                        <td class="px-3 py-2 text-center text-xs text-gray-500">
-                            {% set date_val = item.get('Date', '') %}
-                            {{ date_val[:10] if date_val else '-' }}
-                        </td>
-                        <td class="px-3 py-2 text-gray-600">
-                            {% set invoice_val = item.get('Invoice #', '') %}
-                            {% set invoice_str = invoice_val if invoice_val is string and invoice_val == invoice_val else '' %}
-                            <span class="font-mono text-xs truncate block max-w-24" title="{{ invoice_str }}">
-                                {{ (invoice_str or '-')[:12] }}{% if invoice_str|length > 12 %}...{% endif %}
-                            </span>
-                        </td>
-                        <td class="px-3 py-2 text-gray-500 text-xs">
-                            {% set desc_val = item.get('Description', '') %}
-                            {% set desc_str = desc_val if desc_val is string and desc_val == desc_val else '' %}
-                            <span class="truncate block max-w-40" title="{{ desc_str }}">
-                                {{ (desc_str or '-')[:30] }}{% if desc_str|length > 30 %}...{% endif %}
-                            </span>
-                        </td>
-                        <td class="px-3 py-2 text-right font-mono text-sm">{{ item.get('Amount', '') }}</td>
-                        <td class="px-3 py-2 text-center">
-                            {% set type_code = item.get('Type', '') %}
-                            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold
-                                {% if type_code == 'L' %}bg-blue-100 text-blue-700
-                                {% elif type_code == 'M' %}bg-purple-100 text-purple-700
-                                {% elif type_code == 'S' %}bg-orange-100 text-orange-700
-                                {% else %}bg-gray-100 text-gray-700{% endif %}">
-                                {{ type_code or '?' }}
-                            </span>
-                        </td>
-                        <td class="px-3 py-2">
-                            <div class="flex items-center gap-2">
-                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 shrink-0">
-                                    ✓
-                                </span>
-                                <select class="budget-select flex-1 border border-green-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 bg-white min-w-80"
-                                        data-dc-id="{{ item.get('direct_cost_id', '') }}"
-                                        data-cost-code="{{ item.get('Cost Code', '') }}"
-                                        data-name="{{ item.get('Name', '') }}"
-                                        data-vendor="{{ item.get('Vendor', '') }}"
-                                        data-suggested=""
-                                        data-score="100"
-                                        data-original="{{ item.get('mapped_budget_code', '') }}"
-                                        onchange="enableDirectEditButton(this)"
-                                        aria-label="Select budget code">
-                                    {% for bc in budget_options %}
-                                    <option value="{{ bc.code }}" title="{{ bc.description }}" {% if bc.code == item.get('mapped_budget_code') %}selected{% endif %}>{{ bc.display }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                        </td>
-                        <td class="px-3 py-2 text-center">
-                            <select class="side-select border border-green-300 rounded px-1 py-0.5 text-xs bg-white"
-                                    data-mapping-id="{{ item.get('mapping_id', '') }}"
-                                    data-dc-id="{{ item.get('direct_cost_id', '') }}"
-                                    data-cost-code="{{ item.get('Cost Code', '') }}"
-                                    data-name="{{ item.get('Name', '') }}"
-                                    data-original-side="{{ item.get('side', 'BOTH') }}"
-                                    onchange="updateMappingSide(this, 'direct_to_budget')">
-                                <option value="BOTH" {% if item.get('side', 'BOTH') == 'BOTH' %}selected{% endif %}>Both</option>
-                                <option value="EAST" {% if item.get('side') == 'EAST' %}selected{% endif %}>East</option>
-                                <option value="WEST" {% if item.get('side') == 'WEST' %}selected{% endif %}>West</option>
-                            </select>
-                        </td>
-                        <td class="px-3 py-2 text-center">
-                            <span class="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">mapped</span>
-                        </td>
-                        <td class="px-3 py-2 text-center">
-                            <div class="flex gap-1 justify-center">
-                                <button onclick="saveDirectMapping(this)"
-                                        class="save-btn px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors hidden">
-                                    Update
-                                </button>
-                                <button onclick="deleteDirectMapping('{{ item.get('Cost Code', '') }}', '{{ item.get('Name', '')|e }}')"
-                                        class="delete-btn px-2 py-1 text-red-600 hover:text-red-800 text-xs hover:bg-red-50 rounded">
-                                    Remove
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
+                    <!-- Rows loaded via JavaScript API -->
                 </tbody>
             </table>
+
+            <!-- Infinite scroll sentinel -->
+            <div id="infiniteScrollSentinel" class="h-1 w-full"></div>
+        </div>
+        <!-- End Main Table Pane -->
+
+            <!-- Details Drawer (right side) -->
+            <div id="detailsDrawer" class="w-0 overflow-hidden bg-white border-l shadow-lg transition-all duration-300 flex flex-col"
+                 data-open="false">
+                <!-- Drawer Header -->
+                <div class="sticky top-0 bg-white border-b px-4 py-3 flex justify-between items-center z-10 shrink-0">
+                    <div>
+                        <h3 class="font-semibold text-gray-900">Item Details</h3>
+                        <p id="drawerSubtitle" class="text-xs text-gray-500"></p>
+                    </div>
+                    <button onclick="closeDrawer()" class="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100" title="Close (Esc)">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Drawer Content (scrollable) -->
+                <div id="drawerContent" class="flex-1 overflow-y-auto p-4 space-y-4">
+                    <!-- Section 1: Summary -->
+                    <div class="bg-gray-50 rounded-lg p-3">
+                        <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Summary</h4>
+                        <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                            <dt class="text-gray-500">Vendor</dt>
+                            <dd id="drawerVendor" class="font-medium text-gray-900 truncate"></dd>
+                            <dt class="text-gray-500">Cost Code</dt>
+                            <dd id="drawerCostCode" class="font-mono text-gray-900"></dd>
+                            <dt class="text-gray-500">Name</dt>
+                            <dd id="drawerName" class="font-medium text-gray-900 col-span-2 -mt-1"></dd>
+                            <dt class="text-gray-500">Amount</dt>
+                            <dd id="drawerAmount" class="font-mono font-semibold text-gray-900"></dd>
+                            <dt class="text-gray-500">Type</dt>
+                            <dd id="drawerType"></dd>
+                            <dt class="text-gray-500">Date</dt>
+                            <dd id="drawerDate" class="text-gray-900"></dd>
+                            <dt class="text-gray-500">Invoice #</dt>
+                            <dd id="drawerInvoice" class="font-mono text-gray-900"></dd>
+                        </dl>
+                    </div>
+
+                    <!-- Section 2: Full Description -->
+                    <div>
+                        <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Description</h4>
+                        <p id="drawerDescription" class="text-sm text-gray-700 bg-white border rounded-lg p-3 max-h-24 overflow-y-auto"></p>
+                    </div>
+
+                    <!-- Section 3: Current Mapping (for mapped items) -->
+                    <div id="drawerCurrentMapping" class="hidden">
+                        <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Current Mapping</h4>
+                        <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+                            <div class="flex items-center gap-2">
+                                <span class="text-green-600">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                </span>
+                                <div>
+                                    <div id="drawerMappedCode" class="font-mono font-semibold text-green-800"></div>
+                                    <div id="drawerMappedDesc" class="text-sm text-green-700"></div>
+                                </div>
+                            </div>
+                            <div class="mt-2 text-xs text-green-600">
+                                Side: <span id="drawerMappedSide" class="font-medium"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 4: Suggested Mappings (for unmapped items) -->
+                    <div id="drawerSuggestions">
+                        <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Suggested Mappings</h4>
+                        <div id="drawerSuggestionsList" class="space-y-2">
+                            <!-- Suggestions populated dynamically -->
+                        </div>
+                        <div id="drawerNoSuggestions" class="hidden text-sm text-gray-500 italic py-2">
+                            No suggestions available. Manual selection required.
+                        </div>
+                    </div>
+
+                    <!-- Section 5: Score Breakdown -->
+                    <div id="drawerScoreSection" class="hidden">
+                        <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Score Breakdown</h4>
+                        <div class="bg-white border rounded-lg p-3 space-y-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm text-gray-600 flex items-center gap-2">
+                                    <div class="w-3 h-3 rounded-sm bg-blue-500"></div> Code Match
+                                </span>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                        <div id="drawerScoreCode" class="h-full bg-blue-500 transition-all"></div>
+                                    </div>
+                                    <span id="drawerScoreCodePct" class="text-xs font-mono text-gray-600 w-10 text-right"></span>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm text-gray-600 flex items-center gap-2">
+                                    <div class="w-3 h-3 rounded-sm bg-purple-500"></div> Type Match
+                                </span>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                        <div id="drawerScoreType" class="h-full bg-purple-500 transition-all"></div>
+                                    </div>
+                                    <span id="drawerScoreTypePct" class="text-xs font-mono text-gray-600 w-10 text-right"></span>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm text-gray-600 flex items-center gap-2">
+                                    <div class="w-3 h-3 rounded-sm bg-green-500"></div> Text Similarity
+                                </span>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                        <div id="drawerScoreText" class="h-full bg-green-500 transition-all"></div>
+                                    </div>
+                                    <span id="drawerScoreTextPct" class="text-xs font-mono text-gray-600 w-10 text-right"></span>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm text-gray-600 flex items-center gap-2">
+                                    <div class="w-3 h-3 rounded-sm bg-orange-500"></div> Historical
+                                </span>
+                                <div class="flex items-center gap-2">
+                                    <div class="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                        <div id="drawerScoreHist" class="h-full bg-orange-500 transition-all"></div>
+                                    </div>
+                                    <span id="drawerScoreHistPct" class="text-xs font-mono text-gray-600 w-10 text-right"></span>
+                                </div>
+                            </div>
+                            <div class="border-t pt-2 mt-2 flex items-center justify-between">
+                                <span class="text-sm font-medium text-gray-700">Total Score</span>
+                                <span id="drawerTotalScore" class="text-lg font-bold"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Drawer Actions (sticky bottom) -->
+                <div id="drawerActions" class="border-t bg-gray-50 px-4 py-3 shrink-0">
+                    <!-- Unmapped item actions -->
+                    <div id="drawerUnmappedActions" class="flex gap-2">
+                        <button id="drawerAcceptBtn" onclick="drawerAcceptSuggestion()"
+                                class="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:bg-gray-300 disabled:cursor-not-allowed">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            Accept Suggestion
+                        </button>
+                        <button id="drawerSaveBtn" onclick="drawerSaveMapping()"
+                                class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed">
+                            Save
+                        </button>
+                    </div>
+                    <!-- Mapped item actions -->
+                    <div id="drawerMappedActions" class="hidden flex gap-2">
+                        <button id="drawerUpdateBtn" onclick="drawerUpdateMapping()"
+                                class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed" disabled>
+                            Update
+                        </button>
+                        <button id="drawerRemoveBtn" onclick="drawerRemoveMapping()"
+                                class="px-4 py-2 text-red-600 border border-red-300 rounded-lg hover:bg-red-50 transition-colors">
+                            Remove
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <!-- End Details Drawer -->
+        </div>
+        <!-- End Two-Pane Layout -->
+
+        <!-- Loading indicator for infinite scroll -->
+        <div id="loadingMoreIndicator" class="hidden flex justify-center py-4">
+            <svg class="w-6 h-6 animate-spin text-blue-600" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span class="ml-2 text-gray-600">Loading more...</span>
         </div>
 
-        <!-- Load More Button for Direct→Budget -->
-        {% if has_more_direct %}
-        <div id="directLoadMoreContainer" class="flex justify-center items-center gap-4 py-4 border-t">
-            <button onclick="loadMoreDirectItems()" id="loadMoreDirectBtn"
-                    class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                </svg>
-                Load More
-            </button>
-            <span class="text-sm text-gray-500" id="directLoadedCount">
-                Showing <span id="directLoadedNum">{{ unmapped_direct|length }}</span> of {{ total_unmapped_direct }} unmapped items
-            </span>
-        </div>
-        {% endif %}
-
-        <!-- Footer Info -->
-        <div class="flex justify-between items-center text-sm text-gray-500">
-            <span>{{ total_unmapped_direct }} unmapped, {{ mapped_direct|length }} mapped</span>
-            <span>Total: {{ total_direct }} direct cost items</span>
+        <!-- Empty/Complete state messages -->
+        <div id="directEmptyState" class="hidden text-center py-12 text-gray-500">
+            <p class="text-xl">No items found matching your filters.</p>
+            <button onclick="resetFilters()" class="mt-4 text-blue-600 hover:text-blue-800">Reset filters</button>
         </div>
 
-        {% if not unmapped_direct and not mapped_direct %}
-        <div class="text-center py-12 text-gray-500">
-            <p class="text-xl">No direct cost items found.</p>
-        </div>
-        {% elif not unmapped_direct %}
-        <div class="text-center py-8 text-green-600 bg-green-50 rounded-lg">
+        <div id="directCompleteState" class="hidden text-center py-8 text-green-600 bg-green-50 rounded-lg">
             <svg class="w-16 h-16 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
             <p class="text-lg font-medium">All direct cost items are mapped!</p>
         </div>
-        {% endif %}
+
+        <!-- Footer Info -->
+        <div class="flex justify-between items-center text-sm text-gray-500 pt-2" id="directFooterInfo">
+            <span id="footerLoaded">Loading...</span>
+            <span id="footerTotal"></span>
+        </div>
+
+        <!-- Bulk Action Bar (fixed at bottom, hidden by default) -->
+        <div id="bulkActionBar" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white rounded-xl shadow-2xl px-5 py-3 flex items-center gap-4 z-50">
+            <span id="selectionCount" class="text-sm font-medium">
+                <span id="selectedCountNum">0</span> selected
+            </span>
+            <div class="h-5 w-px bg-gray-600"></div>
+            <button onclick="bulkAcceptSelected()" class="flex items-center gap-2 text-sm font-medium hover:text-green-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                Accept Selected
+            </button>
+            <button onclick="bulkSetSide()" class="flex items-center gap-2 text-sm font-medium hover:text-blue-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+                </svg>
+                Set Side
+            </button>
+            <div class="h-5 w-px bg-gray-600"></div>
+            <button onclick="clearSelection()" class="text-sm text-gray-400 hover:text-white transition-colors px-2 py-1 rounded hover:bg-gray-800">
+                Clear
+            </button>
+        </div>
+
+        <!-- Side Selection Modal for bulk operations -->
+        <div id="sideSelectionModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4">Set Side for Selected Items</h3>
+                <div class="space-y-2 mb-6">
+                    <label class="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                        <input type="radio" name="bulkSide" value="BOTH" class="text-blue-600 focus:ring-blue-500" checked>
+                        <span class="font-medium">Both (East & West)</span>
+                    </label>
+                    <label class="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                        <input type="radio" name="bulkSide" value="EAST" class="text-blue-600 focus:ring-blue-500">
+                        <span class="font-medium">East Only</span>
+                    </label>
+                    <label class="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                        <input type="radio" name="bulkSide" value="WEST" class="text-blue-600 focus:ring-blue-500">
+                        <span class="font-medium">West Only</span>
+                    </label>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="closeSideModal()" class="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
+                        Cancel
+                    </button>
+                    <button onclick="applyBulkSide()" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                        Apply
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <!-- Hidden: Original Jinja table rows removed - now loaded via API -->
+    <script>
+    // Store budget options for JavaScript access
+    const budgetOptions = [
+        {% for bc in budget_options %}
+        { code: "{{ bc.code }}", description: "{{ bc.description|e }}", display: "{{ bc.display|e }}" }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ];
+    </script>
 
     <!-- Score Breakdown Modal -->
     <div id="scoreModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
@@ -1922,134 +1973,546 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ============================================================
-// Pagination - Load More Functionality
+// API-Driven Table with Infinite Scroll and DOM Windowing
 // ============================================================
 
-const paginationState = {
-    direct: {
-        offset: {{ unmapped_direct|length }},
-        total: {{ total_unmapped_direct }},
-        loading: false,
-        limit: 20
-    },
-    budget: {
-        offset: {{ unmapped_budget|length }},
-        total: {{ total_unmapped_budget }},
-        loading: false,
-        limit: 20
+const DOM_WINDOW_SIZE = 150; // Max rows to keep in DOM
+const PAGE_SIZE = 25;
+
+const directTableState = {
+    items: [],        // All loaded items (for windowing reference)
+    offset: 0,        // Current API offset
+    total: 0,         // Total items from API
+    loading: false,   // Prevent concurrent loads
+    hasMore: true,    // More items available
+    filters: {
+        status: 'unmapped',
+        side: '',
+        type_filter: '',
+        search: '',
+        confidence_band: '',
+        sort: 'confidence_desc'
     }
 };
 
-// Get current filters for API calls
-function getCurrentFilters() {
-    const sideFilter = document.getElementById('filterDirectSide')?.value ||
-                       document.getElementById('filterSide')?.value || '';
-    return {
-        side: sideFilter,
-        status: 'unmapped'
+// Initialize on page load for direct_to_budget tab
+document.addEventListener('DOMContentLoaded', () => {
+    if (document.getElementById('directTable')) {
+        restoreFiltersFromUrl();
+        initDirectTableFilters();
+        initDensityToggle();
+        loadDirectTable();
+        initInfiniteScroll();
+    }
+});
+
+// Restore filters from URL params on page load
+function restoreFiltersFromUrl() {
+    const url = new URL(window.location.href);
+    const params = url.searchParams;
+
+    // Restore filter state
+    if (params.has('status')) directTableState.filters.status = params.get('status');
+    if (params.has('side')) directTableState.filters.side = params.get('side');
+    if (params.has('type_filter')) directTableState.filters.type_filter = params.get('type_filter');
+    if (params.has('search')) directTableState.filters.search = params.get('search');
+    if (params.has('confidence_band')) directTableState.filters.confidence_band = params.get('confidence_band');
+    if (params.has('sort')) directTableState.filters.sort = params.get('sort');
+
+    // Update UI elements to match restored state
+    const elements = {
+        searchDirect: directTableState.filters.search,
+        filterBand: directTableState.filters.confidence_band,
+        filterDirectSide: directTableState.filters.side,
+        filterType: directTableState.filters.type_filter,
+        sortDirect: directTableState.filters.sort
     };
+
+    for (const [id, value] of Object.entries(elements)) {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    }
+
+    // Update segmented control to match status
+    updateStatusSegmentedControl(directTableState.filters.status);
+
+    // Restore density from localStorage
+    const savedDensity = localStorage.getItem('tableDensity') || 'comfortable';
+    setTableDensity(savedDensity, false);
 }
 
-// Load more direct cost items
-async function loadMoreDirectItems() {
-    if (paginationState.direct.loading) return;
-    if (paginationState.direct.offset >= paginationState.direct.total) return;
-
-    const btn = document.getElementById('loadMoreDirectBtn');
-    const loadedNum = document.getElementById('directLoadedNum');
-
-    try {
-        paginationState.direct.loading = true;
-        btn.disabled = true;
-        btn.innerHTML = `
-            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            Loading...
-        `;
-
-        const filters = getCurrentFilters();
-        const params = new URLSearchParams({
-            status: 'unmapped',
-            offset: paginationState.direct.offset,
-            limit: paginationState.direct.limit,
-            ...(filters.side && { side: filters.side })
+// Initialize filter event listeners
+function initDirectTableFilters() {
+    // Debounced search
+    let searchTimeout;
+    const searchInput = document.getElementById('searchDirect');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                directTableState.filters.search = e.target.value;
+                resetAndLoadTable();
+            }, 300);
         });
+    }
 
-        const response = await fetch(`/api/mappings/direct/items?${params}`);
-        const data = await response.json();
+    // Status segmented control buttons
+    document.querySelectorAll('.status-seg-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const status = btn.dataset.status;
+            updateStatusSegmentedControl(status);
 
-        if (data.items && data.items.length > 0) {
-            appendDirectRows(data.items);
-            paginationState.direct.offset += data.items.length;
-
-            // Update loaded count
-            if (loadedNum) {
-                loadedNum.textContent = paginationState.direct.offset;
+            // Handle "needs_review" as low confidence unmapped
+            if (status === 'needs_review') {
+                directTableState.filters.status = 'unmapped';
+                directTableState.filters.confidence_band = 'low';
+            } else {
+                directTableState.filters.status = status;
+                if (status !== 'unmapped') {
+                    directTableState.filters.confidence_band = '';
+                }
             }
+            document.getElementById('filterBand').value = directTableState.filters.confidence_band;
+            resetAndLoadTable();
+        });
+    });
 
-            // Initialize searchable dropdowns for new rows
-            initSearchableDropdowns();
+    // Hidden status select (for backwards compatibility)
+    const statusSelect = document.getElementById('filterDirectStatus');
+    if (statusSelect) {
+        statusSelect.addEventListener('change', (e) => {
+            let status = e.target.value;
+            updateStatusSegmentedControl(status);
+            // Handle "needs_review" as low confidence unmapped
+            if (status === 'needs_review') {
+                directTableState.filters.status = 'unmapped';
+                directTableState.filters.confidence_band = 'low';
+            } else {
+                directTableState.filters.status = status;
+                if (status !== 'unmapped') {
+                    directTableState.filters.confidence_band = '';
+                }
+            }
+            document.getElementById('filterBand').value = directTableState.filters.confidence_band;
+            resetAndLoadTable();
+        });
+    }
 
-            // Update keyboard navigation rows
-            updateMappingRows();
-        }
+    // Confidence band filter
+    const bandSelect = document.getElementById('filterBand');
+    if (bandSelect) {
+        bandSelect.addEventListener('change', (e) => {
+            directTableState.filters.confidence_band = e.target.value;
+            resetAndLoadTable();
+        });
+    }
 
-        // Hide button if no more items
-        if (!data.pagination.hasMore) {
-            document.getElementById('directLoadMoreContainer').style.display = 'none';
-        }
+    // Side filter
+    const sideSelect = document.getElementById('filterDirectSide');
+    if (sideSelect) {
+        sideSelect.addEventListener('change', (e) => {
+            directTableState.filters.side = e.target.value;
+            resetAndLoadTable();
+        });
+    }
 
-    } catch (error) {
-        console.error('Error loading more items:', error);
-        showToast('Error loading more items', 'error');
-    } finally {
-        paginationState.direct.loading = false;
-        btn.disabled = false;
-        btn.innerHTML = `
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-            </svg>
-            Load More
-        `;
+    // Type filter
+    const typeSelect = document.getElementById('filterType');
+    if (typeSelect) {
+        typeSelect.addEventListener('change', (e) => {
+            directTableState.filters.type_filter = e.target.value;
+            resetAndLoadTable();
+        });
+    }
+
+    // Sort select
+    const sortSelect = document.getElementById('sortDirect');
+    if (sortSelect) {
+        sortSelect.addEventListener('change', (e) => {
+            directTableState.filters.sort = e.target.value;
+            resetAndLoadTable();
+        });
     }
 }
 
-// Append direct cost rows to the table
-function appendDirectRows(items) {
-    const tbody = document.getElementById('directTableBody');
-    if (!tbody) return;
-
-    // Find insertion point (before mapped items)
-    const mappedRows = tbody.querySelectorAll('tr[data-status="mapped"]');
-    const insertBefore = mappedRows.length > 0 ? mappedRows[0] : null;
-
-    items.forEach(item => {
-        const row = createDirectRow(item);
-        if (insertBefore) {
-            tbody.insertBefore(row, insertBefore);
-        } else {
-            tbody.appendChild(row);
+// Update status segmented control UI
+function updateStatusSegmentedControl(status) {
+    document.querySelectorAll('.status-seg-btn').forEach(btn => {
+        btn.classList.remove('active', 'bg-white', 'shadow-sm', 'text-gray-900');
+        btn.classList.add('text-gray-600');
+        if (btn.dataset.status === status) {
+            btn.classList.add('active', 'bg-white', 'shadow-sm', 'text-gray-900');
+            btn.classList.remove('text-gray-600');
         }
     });
 }
 
-// Create a direct cost table row from item data
+// Initialize density toggle
+function initDensityToggle() {
+    document.querySelectorAll('.density-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            setTableDensity(btn.dataset.density, true);
+        });
+    });
+}
+
+// Set table density mode
+function setTableDensity(density, save = true) {
+    const table = document.getElementById('directTable');
+    if (!table) return;
+
+    // Remove all density classes
+    table.classList.remove('density-comfortable', 'density-compact', 'density-ultra');
+    table.classList.add(`density-${density}`);
+
+    // Update button states
+    document.querySelectorAll('.density-btn').forEach(btn => {
+        btn.classList.remove('active', 'bg-gray-100', 'text-gray-900');
+        btn.classList.add('text-gray-500');
+        if (btn.dataset.density === density) {
+            btn.classList.add('active', 'bg-gray-100', 'text-gray-900');
+            btn.classList.remove('text-gray-500');
+        }
+    });
+
+    // Save to localStorage
+    if (save) {
+        localStorage.setItem('tableDensity', density);
+    }
+}
+
+// Helper to set confidence filter from stats cards
+function setConfidenceFilter(band) {
+    directTableState.filters.confidence_band = band;
+    const bandSelect = document.getElementById('filterBand');
+    if (bandSelect) bandSelect.value = band;
+
+    // Also ensure we're showing unmapped
+    directTableState.filters.status = 'unmapped';
+    const statusSelect = document.getElementById('filterDirectStatus');
+    if (statusSelect) statusSelect.value = 'unmapped';
+
+    resetAndLoadTable();
+}
+
+// Reset filters
+function resetFilters() {
+    directTableState.filters = {
+        status: 'unmapped',
+        side: '',
+        type_filter: '',
+        search: '',
+        confidence_band: '',
+        sort: 'confidence_desc'
+    };
+
+    // Reset UI elements
+    const elements = {
+        searchDirect: '',
+        filterDirectStatus: 'unmapped',
+        filterBand: '',
+        filterDirectSide: '',
+        filterType: '',
+        sortDirect: 'confidence_desc'
+    };
+
+    for (const [id, value] of Object.entries(elements)) {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    }
+
+    // Reset segmented control
+    updateStatusSegmentedControl('unmapped');
+
+    // Don't reset density - that's a user preference
+
+    resetAndLoadTable();
+}
+
+// Reset table state and reload
+function resetAndLoadTable() {
+    directTableState.items = [];
+    directTableState.offset = 0;
+    directTableState.hasMore = true;
+    loadDirectTable();
+
+    // Persist filters to URL
+    persistFiltersToUrl();
+}
+
+// Persist filters to URL for refresh preservation
+function persistFiltersToUrl() {
+    const url = new URL(window.location.href);
+    const filters = directTableState.filters;
+
+    for (const [key, value] of Object.entries(filters)) {
+        if (value) {
+            url.searchParams.set(key, value);
+        } else {
+            url.searchParams.delete(key);
+        }
+    }
+
+    window.history.replaceState({}, '', url);
+}
+
+// Main table loading function
+async function loadDirectTable() {
+    if (directTableState.loading) return;
+
+    const skeleton = document.getElementById('directTableSkeleton');
+    const loadingMore = document.getElementById('loadingMoreIndicator');
+    const emptyState = document.getElementById('directEmptyState');
+    const completeState = document.getElementById('directCompleteState');
+    const tableContainer = document.getElementById('directTableContainer');
+
+    try {
+        directTableState.loading = true;
+
+        // Show skeleton on initial load, loading indicator on "load more"
+        if (directTableState.offset === 0) {
+            if (skeleton) skeleton.classList.remove('hidden');
+            if (emptyState) emptyState.classList.add('hidden');
+            if (completeState) completeState.classList.add('hidden');
+        } else {
+            if (loadingMore) loadingMore.classList.remove('hidden');
+        }
+
+        // Build query params
+        const params = new URLSearchParams({
+            limit: PAGE_SIZE,
+            offset: directTableState.offset
+        });
+
+        const filters = directTableState.filters;
+        if (filters.status) params.set('status', filters.status);
+        if (filters.side) params.set('side', filters.side);
+        if (filters.type_filter) params.set('type_filter', filters.type_filter);
+        if (filters.search) params.set('search', filters.search);
+        if (filters.confidence_band) params.set('confidence_band', filters.confidence_band);
+        if (filters.sort) params.set('sort', filters.sort);
+
+        const response = await fetch(`/api/mappings/direct/items?${params}`);
+        const data = await response.json();
+
+        // Update state
+        directTableState.hasMore = data.pagination.hasMore;
+        directTableState.total = data.pagination.total;
+
+        // Update stats display
+        updateStatsFromData(data.stats);
+
+        // Render rows
+        if (directTableState.offset === 0) {
+            // Initial load: clear and render
+            renderDirectRows(data.items, true);
+        } else {
+            // Append rows with DOM windowing
+            appendDirectRowsWithWindowing(data.items);
+        }
+
+        directTableState.offset += data.items.length;
+
+        // Update footer
+        updateFooterInfo();
+
+        // Show empty state if no results
+        if (directTableState.offset === 0 && data.items.length === 0) {
+            if (emptyState) emptyState.classList.remove('hidden');
+            if (tableContainer) tableContainer.classList.add('hidden');
+        } else {
+            if (emptyState) emptyState.classList.add('hidden');
+            if (tableContainer) tableContainer.classList.remove('hidden');
+        }
+
+        // Show complete state if all mapped and showing unmapped
+        if (filters.status === 'unmapped' && data.stats.total === 0 && data.stats.mapped > 0) {
+            if (completeState) completeState.classList.remove('hidden');
+        }
+
+    } catch (error) {
+        console.error('Error loading direct table:', error);
+        showToast('Error loading data', 'error');
+    } finally {
+        directTableState.loading = false;
+        if (skeleton) skeleton.classList.add('hidden');
+        if (loadingMore) loadingMore.classList.add('hidden');
+    }
+}
+
+// Update stats display from API response
+function updateStatsFromData(stats) {
+    const elements = {
+        statTotal: stats.total + stats.mapped,
+        statMapped: stats.mapped,
+        statHigh: stats.high,
+        statMedium: stats.medium,
+        statLow: stats.low
+    };
+
+    for (const [id, value] of Object.entries(elements)) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    }
+
+    // Update segmented control counts
+    const countUnmapped = document.getElementById('countUnmapped');
+    const countNeedsReview = document.getElementById('countNeedsReview');
+    const countMapped = document.getElementById('countMapped');
+
+    if (countUnmapped) countUnmapped.textContent = stats.total > 0 ? `(${stats.total})` : '';
+    if (countNeedsReview) countNeedsReview.textContent = stats.low > 0 ? `(${stats.low})` : '';
+    if (countMapped) countMapped.textContent = stats.mapped > 0 ? `(${stats.mapped})` : '';
+
+    // Show/hide bulk accept button
+    const bulkContainer = document.getElementById('bulkActionsContainer');
+    const bulkCount = document.getElementById('bulkHighCount');
+    if (bulkContainer && bulkCount) {
+        if (stats.high > 0) {
+            bulkCount.textContent = stats.high;
+            bulkContainer.classList.remove('hidden');
+        } else {
+            bulkContainer.classList.add('hidden');
+        }
+    }
+}
+
+// Update footer info
+function updateFooterInfo() {
+    const footerLoaded = document.getElementById('footerLoaded');
+    const footerTotal = document.getElementById('footerTotal');
+
+    if (footerLoaded) {
+        footerLoaded.textContent = `Showing ${directTableState.offset} of ${directTableState.total} items`;
+    }
+    if (footerTotal) {
+        footerTotal.textContent = `Scroll for more`;
+        if (!directTableState.hasMore) {
+            footerTotal.textContent = 'All items loaded';
+        }
+    }
+}
+
+// Render rows (initial load)
+function renderDirectRows(items, clear = false) {
+    const tbody = document.getElementById('directTableBody');
+    if (!tbody) return;
+
+    if (clear) {
+        tbody.innerHTML = '';
+        directTableState.items = [];
+    }
+
+    items.forEach(item => {
+        directTableState.items.push(item);
+        const row = createDirectRow(item);
+        tbody.appendChild(row);
+    });
+
+    // Initialize searchable dropdowns for new rows
+    if (typeof initSearchableDropdowns === 'function') {
+        initSearchableDropdowns();
+    }
+
+    // Update keyboard navigation
+    if (typeof updateMappingRows === 'function') {
+        updateMappingRows();
+    }
+}
+
+// Append rows with DOM windowing
+function appendDirectRowsWithWindowing(items) {
+    const tbody = document.getElementById('directTableBody');
+    if (!tbody) return;
+
+    // Add new items
+    items.forEach(item => {
+        directTableState.items.push(item);
+        const row = createDirectRow(item);
+        tbody.appendChild(row);
+    });
+
+    // Apply windowing: remove oldest rows if over limit
+    const rows = tbody.querySelectorAll('tr');
+    if (rows.length > DOM_WINDOW_SIZE) {
+        const removeCount = rows.length - DOM_WINDOW_SIZE;
+        for (let i = 0; i < removeCount; i++) {
+            rows[i].remove();
+        }
+    }
+
+    // Initialize searchable dropdowns for new rows
+    if (typeof initSearchableDropdowns === 'function') {
+        initSearchableDropdowns();
+    }
+
+    // Update keyboard navigation
+    if (typeof updateMappingRows === 'function') {
+        updateMappingRows();
+    }
+}
+
+// Initialize infinite scroll with IntersectionObserver
+function initInfiniteScroll() {
+    const sentinel = document.getElementById('infiniteScrollSentinel');
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting && directTableState.hasMore && !directTableState.loading) {
+                loadDirectTable();
+            }
+        });
+    }, {
+        root: document.getElementById('directTableContainer'),
+        rootMargin: '200px',
+        threshold: 0
+    });
+
+    observer.observe(sentinel);
+}
+
+// Legacy function name kept for compatibility
+function loadMoreDirectItems() {
+    if (!directTableState.loading && directTableState.hasMore) {
+        loadDirectTable();
+    }
+}
+
+// Get current filters (legacy compatibility)
+function getCurrentFilters() {
+    return directTableState.filters;
+}
+
+// Append direct cost rows (legacy compatibility wrapper)
+function appendDirectRows(items) {
+    appendDirectRowsWithWindowing(items);
+}
+
+// Create a direct cost table row from item data (handles both mapped and unmapped)
 function createDirectRow(item) {
     const tr = document.createElement('tr');
+    const isMapped = item.is_mapped;
     const confBand = item.confidence_band || 'low';
     const topSugg = item.top_suggestion;
 
-    tr.className = `hover:bg-blue-50 transition-colors ${confBand === 'high' ? 'bg-green-50' : confBand === 'medium' ? 'bg-yellow-50' : ''}`;
-    tr.dataset.status = 'unmapped';
+    // Set row styling based on mapped status
+    if (isMapped) {
+        tr.className = 'bg-green-50 hover:bg-green-100 transition-colors';
+        tr.dataset.status = 'mapped';
+        tr.dataset.band = 'mapped';
+    } else {
+        tr.className = `hover:bg-blue-50 transition-colors ${confBand === 'high' ? 'bg-green-50' : confBand === 'medium' ? 'bg-yellow-50' : ''}`;
+        tr.dataset.status = 'unmapped';
+        tr.dataset.band = confBand;
+    }
+
     tr.dataset.dcId = item.direct_cost_id || '';
     tr.dataset.code = item['Cost Code'] || '';
     tr.dataset.name = item.Name || '';
     tr.dataset.vendor = item.Vendor || '';
     tr.dataset.type = item.Type || '';
     tr.dataset.confidence = item.confidence || 0;
-    tr.dataset.band = confBand;
 
     const vendorStr = (item.Vendor && typeof item.Vendor === 'string') ? item.Vendor : '';
     const nameStr = (item.Name && typeof item.Name === 'string') ? item.Name : '';
@@ -2061,117 +2524,271 @@ function createDirectRow(item) {
     const descVal = item.Description;
     const descStr = (descVal && typeof descVal === 'string' && descVal === descVal) ? descVal : '';
 
-    // Build suggestions options HTML
-    let optionsHtml = '<option value="">-- Select Budget --</option>';
-    if (topSugg) {
-        const suggDesc = topSugg.description || '';
-        const suggDescDisplay = suggDesc.length > 35 ? suggDesc.substring(0, 35) + '...' : suggDesc;
-        optionsHtml += `<option value="${topSugg.budget_code || ''}" selected class="font-medium" title="${suggDesc}">★ ${topSugg.budget_code || ''} – ${suggDescDisplay || '(No description)'} (${Math.round(topSugg.score || 0)}%)</option>`;
+    // Build options HTML - different for mapped vs unmapped
+    let optionsHtml = '';
+    const mappedBudgetCode = item.mapped_budget_code || '';
 
-        // Add alternative suggestions
-        if (item.suggestions && item.suggestions.length > 1) {
-            item.suggestions.slice(1).forEach(sugg => {
-                const altDesc = sugg.description || '';
-                const altDescDisplay = altDesc.length > 30 ? altDesc.substring(0, 30) + '...' : altDesc;
-                optionsHtml += `<option value="${sugg.budget_code || ''}" title="${altDesc}">${sugg.budget_code || ''} – ${altDescDisplay || '(No desc)'} (${Math.round(sugg.score || 0)}%)</option>`;
-            });
-            optionsHtml += '<option disabled>──────────</option>';
+    if (isMapped) {
+        // For mapped items, show all budget options with the mapped one selected
+        budgetOptions.forEach(bc => {
+            const selected = bc.code === mappedBudgetCode ? 'selected' : '';
+            optionsHtml += `<option value="${bc.code}" title="${bc.description}" ${selected}>${bc.display}</option>`;
+        });
+    } else {
+        // For unmapped items, show suggestions first
+        optionsHtml = '<option value="">-- Select Budget --</option>';
+        if (topSugg) {
+            const suggDesc = topSugg.description || '';
+            const suggDescDisplay = suggDesc.length > 35 ? suggDesc.substring(0, 35) + '...' : suggDesc;
+            optionsHtml += `<option value="${topSugg.budget_code || ''}" selected class="font-medium" title="${suggDesc}">★ ${topSugg.budget_code || ''} – ${suggDescDisplay || '(No description)'} (${Math.round(topSugg.score || 0)}%)</option>`;
+
+            if (item.suggestions && item.suggestions.length > 1) {
+                item.suggestions.slice(1).forEach(sugg => {
+                    const altDesc = sugg.description || '';
+                    const altDescDisplay = altDesc.length > 30 ? altDesc.substring(0, 30) + '...' : altDesc;
+                    optionsHtml += `<option value="${sugg.budget_code || ''}" title="${altDesc}">${sugg.budget_code || ''} – ${altDescDisplay || '(No desc)'} (${Math.round(sugg.score || 0)}%)</option>`;
+                });
+                optionsHtml += '<option disabled>──────────</option>';
+            }
         }
+        // Add all budget options
+        budgetOptions.forEach(bc => {
+            if (!topSugg || bc.code !== topSugg.budget_code) {
+                optionsHtml += `<option value="${bc.code}" title="${bc.description}">${bc.display}</option>`;
+            }
+        });
     }
-    // Add all budget options (will be handled by searchable dropdown)
-    {% for bc in budget_options %}
-    optionsHtml += `<option value="{{ bc.code }}" title="{{ bc.description }}">{{ bc.display }}</option>`;
-    {% endfor %}
 
     const confidenceBadgeClass = confBand === 'high' ? 'bg-green-100 text-green-800' :
                                   confBand === 'medium' ? 'bg-yellow-100 text-yellow-800' :
                                   'bg-gray-100 text-gray-600';
 
-    tr.innerHTML = `
-        <td class="px-3 py-2 text-gray-600 max-w-32 truncate" title="${vendorStr}">${(vendorStr || 'N/A').substring(0, 20)}</td>
-        <td class="px-3 py-2"><span class="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">${item['Cost Code'] || ''}</span></td>
-        <td class="px-3 py-2 text-gray-600">
-            <span class="truncate block max-w-48" title="${nameStr}">${(nameStr || 'N/A').substring(0, 35)}${nameStr.length > 35 ? '...' : ''}</span>
-        </td>
-        <td class="px-3 py-2 text-center text-xs text-gray-500">${dateStr}</td>
-        <td class="px-3 py-2 text-gray-600">
-            <span class="font-mono text-xs truncate block max-w-24" title="${invoiceStr}">${(invoiceStr || '-').substring(0, 12)}${invoiceStr.length > 12 ? '...' : ''}</span>
-        </td>
-        <td class="px-3 py-2 text-gray-500 text-xs">
-            <span class="truncate block max-w-40" title="${descStr}">${(descStr || '-').substring(0, 30)}${descStr.length > 30 ? '...' : ''}</span>
-        </td>
-        <td class="px-3 py-2 text-right font-mono text-sm">${item.Amount || ''}</td>
-        <td class="px-3 py-2 text-center">
-            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
-                typeCode === 'L' ? 'bg-blue-100 text-blue-700' :
-                typeCode === 'M' ? 'bg-purple-100 text-purple-700' :
-                typeCode === 'S' ? 'bg-orange-100 text-orange-700' :
-                'bg-gray-100 text-gray-700'
-            }">${typeCode || '?'}</span>
-        </td>
-        <td class="px-3 py-2">
-            <div class="flex items-center gap-2">
-                ${topSugg ? `
-                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold shrink-0 ${confidenceBadgeClass}">${Math.round(item.confidence || 0)}%</span>
-                ` : `
-                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 shrink-0">Manual</span>
-                `}
-                <select class="budget-select flex-1 border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 min-w-80 ${
-                    confBand === 'high' ? 'border-green-300' :
-                    confBand === 'medium' ? 'border-yellow-300' :
-                    !topSugg ? 'border-red-300' : ''
-                }"
+    // Generate mini breakdown bars for inline confidence display
+    const miniBreakdownBars = renderMiniBreakdownBars(topSugg?.breakdown);
+
+    const currentSide = item.side || 'BOTH';
+    const sideOptions = `
+        <option value="BOTH" ${currentSide === 'BOTH' ? 'selected' : ''}>Both</option>
+        <option value="EAST" ${currentSide === 'EAST' ? 'selected' : ''}>East</option>
+        <option value="WEST" ${currentSide === 'WEST' ? 'selected' : ''}>West</option>
+    `;
+
+    // Checkbox cell HTML (same for both)
+    const checkboxCell = `
+        <td class="px-2 py-2 text-center" onclick="event.stopPropagation()">
+            <input type="checkbox" class="row-checkbox rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                   data-dc-id="${item.direct_cost_id || ''}"
+                   onchange="toggleRowSelection('${item.direct_cost_id || ''}', this.checked)">
+        </td>`;
+
+    // Different rendering for mapped vs unmapped
+    if (isMapped) {
+        tr.innerHTML = `
+            ${checkboxCell}
+            <td class="px-3 py-2 text-gray-600 max-w-32 truncate" title="${vendorStr}">${(vendorStr || 'N/A').substring(0, 20)}</td>
+            <td class="px-3 py-2"><span class="font-mono text-xs bg-green-200 px-1.5 py-0.5 rounded">${item['Cost Code'] || ''}</span></td>
+            <td class="px-3 py-2 text-gray-600">
+                <span class="truncate block max-w-48" title="${nameStr}">${(nameStr || 'N/A').substring(0, 35)}${nameStr.length > 35 ? '...' : ''}</span>
+            </td>
+            <td class="px-3 py-2 text-center text-xs text-gray-500">${dateStr}</td>
+            <td class="px-3 py-2 text-gray-600">
+                <span class="font-mono text-xs truncate block max-w-24" title="${invoiceStr}">${(invoiceStr || '-').substring(0, 12)}${invoiceStr.length > 12 ? '...' : ''}</span>
+            </td>
+            <td class="px-3 py-2 text-gray-500 text-xs">
+                <span class="truncate block max-w-40" title="${descStr}">${(descStr || '-').substring(0, 30)}${descStr.length > 30 ? '...' : ''}</span>
+            </td>
+            <td class="px-3 py-2 text-right font-mono text-sm">${item.Amount || ''}</td>
+            <td class="px-3 py-2 text-center">
+                <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
+                    typeCode === 'L' ? 'bg-blue-100 text-blue-700' :
+                    typeCode === 'M' ? 'bg-purple-100 text-purple-700' :
+                    typeCode === 'S' ? 'bg-orange-100 text-orange-700' :
+                    'bg-gray-100 text-gray-700'
+                }">${typeCode || '?'}</span>
+            </td>
+            <td class="px-3 py-2">
+                <div class="flex items-center gap-2">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 shrink-0">✓</span>
+                    <select class="budget-select flex-1 border border-green-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 bg-white min-w-80"
+                        data-dc-id="${item.direct_cost_id || ''}"
+                        data-cost-code="${item['Cost Code'] || ''}"
+                        data-name="${item.Name || ''}"
+                        data-vendor="${item.Vendor || ''}"
+                        data-suggested=""
+                        data-score="100"
+                        data-original="${mappedBudgetCode}"
+                        onchange="enableDirectEditButton(this)"
+                        aria-label="Select budget code">
+                        ${optionsHtml}
+                    </select>
+                </div>
+            </td>
+            <td class="px-3 py-2 text-center">
+                <select class="side-select border border-green-300 rounded px-1 py-0.5 text-xs bg-white"
+                    data-mapping-id="${item.mapping_id || ''}"
                     data-dc-id="${item.direct_cost_id || ''}"
                     data-cost-code="${item['Cost Code'] || ''}"
                     data-name="${item.Name || ''}"
-                    data-vendor="${item.Vendor || ''}"
-                    data-suggested="${topSugg ? topSugg.budget_code : ''}"
-                    data-score="${item.confidence || 0}"
-                    data-original=""
-                    onchange="enableSaveButton(this)"
-                    aria-label="Select budget code">
-                    ${optionsHtml}
+                    data-original-side="${currentSide}"
+                    onchange="updateMappingSide(this, 'direct_to_budget')">
+                    ${sideOptions}
                 </select>
-            </div>
-        </td>
-        <td class="px-3 py-2 text-center">
-            <select class="side-select border rounded px-1 py-0.5 text-xs"
+            </td>
+            <td class="px-3 py-2 text-center">
+                <span class="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">mapped</span>
+            </td>
+            <td class="px-3 py-2 text-center">
+                <div class="flex gap-1 justify-center">
+                    <button onclick="saveDirectMapping(this)"
+                        class="save-btn px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors hidden">
+                        Update
+                    </button>
+                    <button onclick="deleteDirectMapping('${escapeHtml(item['Cost Code'] || '')}', '${escapeHtml(item.Name || '')}')"
+                        class="delete-btn px-2 py-1 text-red-600 hover:text-red-800 text-xs hover:bg-red-50 rounded">
+                        Remove
+                    </button>
+                </div>
+            </td>
+        `;
+    } else {
+        tr.innerHTML = `
+            ${checkboxCell}
+            <td class="px-3 py-2 text-gray-600 max-w-32 truncate" title="${vendorStr}">${(vendorStr || 'N/A').substring(0, 20)}</td>
+            <td class="px-3 py-2"><span class="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">${item['Cost Code'] || ''}</span></td>
+            <td class="px-3 py-2 text-gray-600">
+                <span class="truncate block max-w-48" title="${nameStr}">${(nameStr || 'N/A').substring(0, 35)}${nameStr.length > 35 ? '...' : ''}</span>
+            </td>
+            <td class="px-3 py-2 text-center text-xs text-gray-500">${dateStr}</td>
+            <td class="px-3 py-2 text-gray-600">
+                <span class="font-mono text-xs truncate block max-w-24" title="${invoiceStr}">${(invoiceStr || '-').substring(0, 12)}${invoiceStr.length > 12 ? '...' : ''}</span>
+            </td>
+            <td class="px-3 py-2 text-gray-500 text-xs">
+                <span class="truncate block max-w-40" title="${descStr}">${(descStr || '-').substring(0, 30)}${descStr.length > 30 ? '...' : ''}</span>
+            </td>
+            <td class="px-3 py-2 text-right font-mono text-sm">${item.Amount || ''}</td>
+            <td class="px-3 py-2 text-center">
+                <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
+                    typeCode === 'L' ? 'bg-blue-100 text-blue-700' :
+                    typeCode === 'M' ? 'bg-purple-100 text-purple-700' :
+                    typeCode === 'S' ? 'bg-orange-100 text-orange-700' :
+                    'bg-gray-100 text-gray-700'
+                }">${typeCode || '?'}</span>
+            </td>
+            <td class="px-3 py-2">
+                <div class="flex flex-col gap-1">
+                    <div class="flex items-center gap-2">
+                        ${topSugg ? `
+                        <div class="flex items-center gap-1.5 shrink-0">
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold ${confidenceBadgeClass}">${Math.round(item.confidence || 0)}%</span>
+                            <div class="flex gap-0.5" title="Code | Type | Text | History">
+                                ${miniBreakdownBars}
+                            </div>
+                        </div>
+                        ` : `
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 shrink-0">Manual</span>
+                        `}
+                        <select class="budget-select flex-1 border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 min-w-72 ${
+                            confBand === 'high' ? 'border-green-300' :
+                            confBand === 'medium' ? 'border-yellow-300' :
+                            !topSugg ? 'border-red-300' : ''
+                        }"
+                            data-dc-id="${item.direct_cost_id || ''}"
+                            data-cost-code="${item['Cost Code'] || ''}"
+                            data-name="${item.Name || ''}"
+                            data-vendor="${item.Vendor || ''}"
+                            data-suggested="${topSugg ? topSugg.budget_code : ''}"
+                            data-score="${item.confidence || 0}"
+                            data-original=""
+                            onchange="enableSaveButton(this)"
+                            aria-label="Select budget code">
+                            ${optionsHtml}
+                        </select>
+                    </div>
+                </div>
+            </td>
+            <td class="px-3 py-2 text-center">
+                <select class="side-select border rounded px-1 py-0.5 text-xs"
                     data-dc-id="${item.direct_cost_id || ''}"
                     data-cost-code="${item['Cost Code'] || ''}"
                     data-name="${item.Name || ''}">
-                <option value="BOTH" selected>Both</option>
-                <option value="EAST">East</option>
-                <option value="WEST">West</option>
-            </select>
-        </td>
-        <td class="px-3 py-2 text-center">
-            <span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">unmapped</span>
-        </td>
-        <td class="px-3 py-2 text-center">
-            <div class="flex gap-1 justify-center">
-                ${confBand === 'high' && topSugg ? `
-                <button onclick="quickAccept(this)"
+                    ${sideOptions}
+                </select>
+            </td>
+            <td class="px-3 py-2 text-center">
+                <span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">unmapped</span>
+            </td>
+            <td class="px-3 py-2 text-center">
+                <div class="flex gap-1 justify-center">
+                    ${confBand === 'high' && topSugg ? `
+                    <button onclick="quickAccept(this)"
                         class="quick-accept-btn px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors flex items-center gap-1"
                         title="Accept ${topSugg.budget_code} (${Math.round(item.confidence || 0)}%)"
                         data-budget-code="${topSugg.budget_code}">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                    </svg>
-                    Accept
-                </button>
-                ` : `
-                <button onclick="saveDirectMapping(this)"
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        Accept
+                    </button>
+                    ` : `
+                    <button onclick="saveDirectMapping(this)"
                         class="save-btn px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                         ${!topSugg ? 'disabled' : ''}>
-                    Save
-                </button>
-                `}
-            </div>
-        </td>
-    `;
+                        Save
+                    </button>
+                    `}
+                </div>
+            </td>
+        `;
+    }
+
+    // Store item data on row for drawer access
+    tr._itemData = item;
+
+    // Add click handler for drawer
+    tr.style.cursor = 'pointer';
+    tr.addEventListener('click', (e) => {
+        handleRowClick(item, e);
+    });
 
     return tr;
 }
+
+// Helper to escape HTML for safe insertion
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/[&<>"']/g, (match) => {
+        const escapes = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+        return escapes[match];
+    });
+}
+
+// Render mini breakdown bars for inline confidence display
+function renderMiniBreakdownBars(breakdown) {
+    if (!breakdown) return '';
+
+    const bars = [
+        { value: breakdown.code_match || 0, color: 'bg-blue-500', title: 'Code Match' },
+        { value: breakdown.type_match || 0, color: 'bg-purple-500', title: 'Type Match' },
+        { value: breakdown.text_sim || 0, color: 'bg-green-500', title: 'Text Similarity' },
+        { value: breakdown.historical || 0, color: 'bg-orange-500', title: 'Historical' }
+    ];
+
+    return bars.map(bar => `
+        <div class="w-3 h-2.5 bg-gray-200 rounded-sm overflow-hidden" title="${bar.title}: ${Math.round(bar.value * 100)}%">
+            <div class="h-full ${bar.color} transition-all" style="width:${bar.value * 100}%"></div>
+        </div>
+    `).join('');
+}
+
+// Budget pagination state (kept for Budget→GMP tab)
+const paginationState = {
+    budget: {
+        offset: {{ unmapped_budget|length if unmapped_budget else 0 }},
+        total: {{ total_unmapped_budget if total_unmapped_budget else 0 }},
+        loading: false,
+        limit: 20
+    }
+};
 
 // Load more budget items
 async function loadMoreBudgetItems() {
@@ -2365,6 +2982,13 @@ function handleKeyboardShortcut(e) {
 
     // Close help modal with Escape
     if (e.key === 'Escape') {
+        // First check drawer
+        if (isDrawerOpen()) {
+            e.preventDefault();
+            closeDrawer();
+            return;
+        }
+        // Then check help modal
         const helpModal = document.getElementById('keyboardHelpModal');
         if (helpModal && !helpModal.classList.contains('hidden')) {
             helpModal.classList.add('hidden');
@@ -2628,6 +3252,570 @@ function toggleKeyboardHelp() {
         }
     }
 }
+
+// ============================================================
+// Details Drawer Functionality
+// ============================================================
+
+let currentDrawerItem = null;
+
+function openDrawer(item) {
+    currentDrawerItem = item;
+    const drawer = document.getElementById('detailsDrawer');
+    const tablePane = document.getElementById('directTableContainer');
+
+    if (!drawer) return;
+
+    // Populate drawer content
+    populateDrawer(item);
+
+    // Show drawer with animation
+    drawer.dataset.open = 'true';
+    drawer.classList.remove('w-0');
+    drawer.classList.add('w-[480px]', 'border-l');
+
+    // Shrink table pane to make room
+    if (tablePane) {
+        tablePane.classList.add('mr-0');
+    }
+
+    // Highlight the selected row
+    highlightDrawerRow(item);
+}
+
+function closeDrawer() {
+    const drawer = document.getElementById('detailsDrawer');
+    const tablePane = document.getElementById('directTableContainer');
+
+    if (!drawer) return;
+
+    // Hide drawer with animation
+    drawer.dataset.open = 'false';
+    drawer.classList.add('w-0');
+    drawer.classList.remove('w-[480px]', 'border-l');
+
+    // Remove row highlight
+    document.querySelectorAll('#directTableBody tr.drawer-selected').forEach(row => {
+        row.classList.remove('drawer-selected');
+    });
+
+    currentDrawerItem = null;
+}
+
+function highlightDrawerRow(item) {
+    // Remove previous highlight
+    document.querySelectorAll('#directTableBody tr.drawer-selected').forEach(row => {
+        row.classList.remove('drawer-selected');
+    });
+
+    // Add highlight to current row
+    if (item && item.direct_cost_id) {
+        const row = document.querySelector(`#directTableBody tr[data-dc-id="${item.direct_cost_id}"]`);
+        if (row) {
+            row.classList.add('drawer-selected');
+        }
+    }
+}
+
+function populateDrawer(item) {
+    if (!item) return;
+
+    const isMapped = item.is_mapped;
+    const topSugg = item.top_suggestion;
+
+    // Section 1: Summary
+    document.getElementById('drawerVendor').textContent = item.Vendor || 'N/A';
+    document.getElementById('drawerCostCode').textContent = item['Cost Code'] || '';
+    document.getElementById('drawerName').textContent = item.Name || 'N/A';
+    document.getElementById('drawerAmount').textContent = item.Amount || '';
+
+    // Type badge
+    const typeCode = item.Type || '';
+    const typeEl = document.getElementById('drawerType');
+    if (typeEl) {
+        const typeBadgeClass = typeCode === 'L' ? 'bg-blue-100 text-blue-700' :
+                               typeCode === 'M' ? 'bg-purple-100 text-purple-700' :
+                               typeCode === 'S' ? 'bg-orange-100 text-orange-700' :
+                               'bg-gray-100 text-gray-700';
+        const typeName = typeCode === 'L' ? 'Labor' :
+                         typeCode === 'M' ? 'Material' :
+                         typeCode === 'S' ? 'Subcontract' :
+                         typeCode === 'O' ? 'Other' : typeCode || '?';
+        typeEl.innerHTML = `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${typeBadgeClass}">${typeName}</span>`;
+    }
+
+    // Date and Invoice
+    const dateVal = item.Date || '';
+    document.getElementById('drawerDate').textContent = dateVal ? String(dateVal).substring(0, 10) : '-';
+    document.getElementById('drawerInvoice').textContent = item['Invoice #'] || '-';
+
+    // Subtitle
+    const subtitle = document.getElementById('drawerSubtitle');
+    if (subtitle) {
+        subtitle.textContent = isMapped ? 'Mapped Item' : (item.confidence ? `${Math.round(item.confidence)}% confidence` : 'Manual mapping needed');
+    }
+
+    // Section 2: Full Description
+    document.getElementById('drawerDescription').textContent = item.Description || 'No description available';
+
+    // Section 3: Current Mapping (for mapped items)
+    const currentMappingSection = document.getElementById('drawerCurrentMapping');
+    if (isMapped) {
+        currentMappingSection.classList.remove('hidden');
+        document.getElementById('drawerMappedCode').textContent = item.mapped_budget_code || '';
+        document.getElementById('drawerMappedDesc').textContent = item.mapped_budget_desc || '';
+        document.getElementById('drawerMappedSide').textContent = item.side || 'BOTH';
+    } else {
+        currentMappingSection.classList.add('hidden');
+    }
+
+    // Section 4: Suggestions (for unmapped items)
+    const suggestionsSection = document.getElementById('drawerSuggestions');
+    const suggestionsList = document.getElementById('drawerSuggestionsList');
+    const noSuggestions = document.getElementById('drawerNoSuggestions');
+
+    if (!isMapped && item.suggestions && item.suggestions.length > 0) {
+        suggestionsSection.classList.remove('hidden');
+        noSuggestions.classList.add('hidden');
+
+        suggestionsList.innerHTML = item.suggestions.slice(0, 5).map((sugg, idx) => {
+            const isTop = idx === 0;
+            const confClass = sugg.confidence_band === 'high' ? 'border-green-300 bg-green-50' :
+                              sugg.confidence_band === 'medium' ? 'border-yellow-300 bg-yellow-50' :
+                              'border-gray-300 bg-white';
+            const scoreClass = sugg.confidence_band === 'high' ? 'text-green-700 bg-green-100' :
+                               sugg.confidence_band === 'medium' ? 'text-yellow-700 bg-yellow-100' :
+                               'text-gray-600 bg-gray-100';
+
+            return `
+                <div class="border rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow ${confClass} ${isTop ? 'ring-2 ring-blue-400' : ''}"
+                     onclick="selectDrawerSuggestion('${sugg.budget_code}', ${sugg.score})">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1 min-w-0">
+                            <div class="font-mono font-medium text-gray-900">${sugg.budget_code}</div>
+                            <div class="text-sm text-gray-600 truncate">${sugg.description || ''}</div>
+                        </div>
+                        <span class="shrink-0 ml-2 px-2 py-1 rounded text-sm font-bold ${scoreClass}">${Math.round(sugg.score)}%</span>
+                    </div>
+                    ${isTop ? '<div class="mt-1 text-xs text-blue-600 font-medium">Top recommendation</div>' : ''}
+                </div>
+            `;
+        }).join('');
+    } else if (!isMapped) {
+        suggestionsSection.classList.remove('hidden');
+        suggestionsList.innerHTML = '';
+        noSuggestions.classList.remove('hidden');
+    } else {
+        suggestionsSection.classList.add('hidden');
+    }
+
+    // Section 5: Score Breakdown
+    const scoreSection = document.getElementById('drawerScoreSection');
+    if (topSugg && topSugg.breakdown) {
+        scoreSection.classList.remove('hidden');
+        const bd = topSugg.breakdown;
+
+        // Update score bars
+        const setScore = (id, value) => {
+            const bar = document.getElementById(id);
+            const pct = document.getElementById(id + 'Pct');
+            if (bar) bar.style.width = `${(value || 0) * 100}%`;
+            if (pct) pct.textContent = `${Math.round((value || 0) * 100)}%`;
+        };
+
+        setScore('drawerScoreCode', bd.code_match);
+        setScore('drawerScoreType', bd.type_match);
+        setScore('drawerScoreText', bd.text_sim);
+        setScore('drawerScoreHist', bd.historical);
+
+        // Total score
+        const totalScoreEl = document.getElementById('drawerTotalScore');
+        if (totalScoreEl) {
+            const totalScore = Math.round(item.confidence || topSugg.score || 0);
+            const confBand = item.confidence_band || 'low';
+            const totalClass = confBand === 'high' ? 'text-green-600' :
+                               confBand === 'medium' ? 'text-yellow-600' :
+                               'text-red-600';
+            totalScoreEl.className = `text-lg font-bold ${totalClass}`;
+            totalScoreEl.textContent = `${totalScore}%`;
+        }
+    } else {
+        scoreSection.classList.add('hidden');
+    }
+
+    // Actions visibility
+    const unmappedActions = document.getElementById('drawerUnmappedActions');
+    const mappedActions = document.getElementById('drawerMappedActions');
+
+    if (isMapped) {
+        unmappedActions.classList.add('hidden');
+        mappedActions.classList.remove('hidden');
+        mappedActions.classList.add('flex');
+    } else {
+        unmappedActions.classList.remove('hidden');
+        unmappedActions.classList.add('flex');
+        mappedActions.classList.add('hidden');
+        mappedActions.classList.remove('flex');
+
+        // Enable/disable accept button based on suggestion
+        const acceptBtn = document.getElementById('drawerAcceptBtn');
+        if (acceptBtn) {
+            acceptBtn.disabled = !topSugg;
+        }
+    }
+}
+
+// Select a suggestion from the drawer
+function selectDrawerSuggestion(budgetCode, score) {
+    if (!currentDrawerItem) return;
+
+    // Find and update the row's select element
+    const row = document.querySelector(`#directTableBody tr[data-dc-id="${currentDrawerItem.direct_cost_id}"]`);
+    if (row) {
+        const select = row.querySelector('.budget-select');
+        if (select) {
+            select.value = budgetCode;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }
+
+    // Update drawer to highlight the selected suggestion
+    document.querySelectorAll('#drawerSuggestionsList > div').forEach(div => {
+        div.classList.remove('ring-2', 'ring-blue-400');
+        if (div.querySelector('.font-mono').textContent === budgetCode) {
+            div.classList.add('ring-2', 'ring-blue-400');
+        }
+    });
+
+    // Enable the save button
+    const saveBtn = document.getElementById('drawerSaveBtn');
+    if (saveBtn) {
+        saveBtn.disabled = false;
+    }
+}
+
+// Drawer action: Accept top suggestion
+function drawerAcceptSuggestion() {
+    if (!currentDrawerItem || !currentDrawerItem.top_suggestion) return;
+
+    const row = document.querySelector(`#directTableBody tr[data-dc-id="${currentDrawerItem.direct_cost_id}"]`);
+    if (row) {
+        const quickAcceptBtn = row.querySelector('.quick-accept-btn');
+        if (quickAcceptBtn) {
+            quickAcceptBtn.click();
+            // Close drawer after successful accept
+            setTimeout(() => {
+                closeDrawer();
+                // Reload the table to refresh state
+                resetAndLoadTable();
+            }, 500);
+            return;
+        }
+
+        // Fallback to regular save
+        const select = row.querySelector('.budget-select');
+        if (select && currentDrawerItem.top_suggestion.budget_code) {
+            select.value = currentDrawerItem.top_suggestion.budget_code;
+            const saveBtn = row.querySelector('.save-btn');
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.click();
+                setTimeout(() => {
+                    closeDrawer();
+                    resetAndLoadTable();
+                }, 500);
+            }
+        }
+    }
+}
+
+// Drawer action: Save current mapping selection
+function drawerSaveMapping() {
+    if (!currentDrawerItem) return;
+
+    const row = document.querySelector(`#directTableBody tr[data-dc-id="${currentDrawerItem.direct_cost_id}"]`);
+    if (row) {
+        const saveBtn = row.querySelector('.save-btn');
+        if (saveBtn && !saveBtn.disabled) {
+            saveBtn.click();
+            setTimeout(() => {
+                closeDrawer();
+                resetAndLoadTable();
+            }, 500);
+        } else {
+            showToast('Please select a budget code first', true);
+        }
+    }
+}
+
+// Drawer action: Update existing mapping
+function drawerUpdateMapping() {
+    if (!currentDrawerItem || !currentDrawerItem.is_mapped) return;
+
+    const row = document.querySelector(`#directTableBody tr[data-dc-id="${currentDrawerItem.direct_cost_id}"]`);
+    if (row) {
+        const saveBtn = row.querySelector('.save-btn');
+        if (saveBtn && !saveBtn.disabled) {
+            saveBtn.click();
+            setTimeout(() => {
+                closeDrawer();
+                resetAndLoadTable();
+            }, 500);
+        }
+    }
+}
+
+// Drawer action: Remove existing mapping
+function drawerRemoveMapping() {
+    if (!currentDrawerItem || !currentDrawerItem.is_mapped) return;
+
+    const costCode = currentDrawerItem['Cost Code'];
+    const name = currentDrawerItem.Name;
+
+    if (costCode && name) {
+        deleteDirectMapping(costCode, name);
+        closeDrawer();
+    }
+}
+
+// Check if drawer is currently open
+function isDrawerOpen() {
+    const drawer = document.getElementById('detailsDrawer');
+    return drawer && drawer.dataset.open === 'true';
+}
+
+// Handle row click to open drawer
+function handleRowClick(item, e) {
+    // Don't open drawer if clicking on interactive elements
+    const target = e.target;
+    if (target.closest('select') ||
+        target.closest('button') ||
+        target.closest('input') ||
+        target.closest('.searchable-dropdown') ||
+        target.closest('.searchable-dropdown-input')) {
+        return;
+    }
+
+    openDrawer(item);
+}
+
+// ============================================================
+// Row Selection & Bulk Actions
+// ============================================================
+
+const selectedIds = new Set();
+
+// Toggle individual row selection
+function toggleRowSelection(dcId, checked) {
+    if (checked) {
+        selectedIds.add(dcId);
+    } else {
+        selectedIds.delete(dcId);
+    }
+    updateBulkActionBar();
+    updateSelectAllCheckbox();
+}
+
+// Toggle all visible rows
+function toggleSelectAll(checked) {
+    const checkboxes = document.querySelectorAll('#directTableBody .row-checkbox');
+    checkboxes.forEach(cb => {
+        cb.checked = checked;
+        const dcId = cb.dataset.dcId;
+        if (dcId) {
+            if (checked) {
+                selectedIds.add(dcId);
+            } else {
+                selectedIds.delete(dcId);
+            }
+        }
+    });
+    updateBulkActionBar();
+}
+
+// Update "select all" checkbox state based on individual selections
+function updateSelectAllCheckbox() {
+    const selectAllCb = document.getElementById('selectAllRows');
+    const checkboxes = document.querySelectorAll('#directTableBody .row-checkbox');
+
+    if (!selectAllCb || checkboxes.length === 0) return;
+
+    const checkedCount = document.querySelectorAll('#directTableBody .row-checkbox:checked').length;
+
+    if (checkedCount === 0) {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = false;
+    } else if (checkedCount === checkboxes.length) {
+        selectAllCb.checked = true;
+        selectAllCb.indeterminate = false;
+    } else {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = true;
+    }
+}
+
+// Update bulk action bar visibility and count
+function updateBulkActionBar() {
+    const bar = document.getElementById('bulkActionBar');
+    const countEl = document.getElementById('selectedCountNum');
+
+    if (!bar) return;
+
+    if (selectedIds.size > 0) {
+        bar.classList.remove('hidden');
+        if (countEl) countEl.textContent = selectedIds.size;
+    } else {
+        bar.classList.add('hidden');
+    }
+}
+
+// Clear all selections
+function clearSelection() {
+    selectedIds.clear();
+
+    // Uncheck all checkboxes
+    document.querySelectorAll('#directTableBody .row-checkbox').forEach(cb => {
+        cb.checked = false;
+    });
+
+    const selectAllCb = document.getElementById('selectAllRows');
+    if (selectAllCb) {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = false;
+    }
+
+    updateBulkActionBar();
+}
+
+// Bulk accept selected items (uses their top suggestions)
+async function bulkAcceptSelected() {
+    if (selectedIds.size === 0) {
+        showToast('No items selected', true);
+        return;
+    }
+
+    const idsArray = Array.from(selectedIds);
+    showToast(`Accepting ${idsArray.length} items...`, false);
+
+    try {
+        // Get the items from our state to access their suggestions
+        const itemsToAccept = directTableState.items.filter(item =>
+            selectedIds.has(item.direct_cost_id) &&
+            item.top_suggestion &&
+            !item.is_mapped
+        );
+
+        if (itemsToAccept.length === 0) {
+            showToast('No unmapped items with suggestions selected', true);
+            return;
+        }
+
+        // Build the mappings array
+        const mappings = itemsToAccept.map(item => ({
+            cost_code: item['Cost Code'],
+            name: item.Name,
+            budget_code: item.top_suggestion.budget_code,
+            side: item.side || 'BOTH'
+        }));
+
+        // Call the bulk save endpoint
+        const response = await fetch('/api/mappings/bulk-save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mappings, mapping_type: 'direct_to_budget' })
+        });
+
+        const result = await response.json();
+
+        if (result.success || result.saved > 0) {
+            showToast(`Successfully saved ${result.saved || mappings.length} mappings!`, false);
+            clearSelection();
+            resetAndLoadTable();
+        } else {
+            showToast(result.error || 'Error saving mappings', true);
+        }
+    } catch (error) {
+        console.error('Bulk accept error:', error);
+        showToast('Error accepting selected items', true);
+    }
+}
+
+// Open side selection modal
+function bulkSetSide() {
+    if (selectedIds.size === 0) {
+        showToast('No items selected', true);
+        return;
+    }
+
+    const modal = document.getElementById('sideSelectionModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+// Close side selection modal
+function closeSideModal() {
+    const modal = document.getElementById('sideSelectionModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+// Apply bulk side change
+async function applyBulkSide() {
+    const selectedSide = document.querySelector('input[name="bulkSide"]:checked')?.value;
+    if (!selectedSide) {
+        showToast('Please select a side', true);
+        return;
+    }
+
+    const idsArray = Array.from(selectedIds);
+    showToast(`Setting side to ${selectedSide} for ${idsArray.length} items...`, false);
+
+    try {
+        // Update the side select for each selected row
+        for (const dcId of idsArray) {
+            const row = document.querySelector(`#directTableBody tr[data-dc-id="${dcId}"]`);
+            if (row) {
+                const sideSelect = row.querySelector('.side-select');
+                if (sideSelect) {
+                    sideSelect.value = selectedSide;
+                    // Trigger change event if it's a mapped item
+                    if (row.dataset.status === 'mapped') {
+                        sideSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+            }
+        }
+
+        closeSideModal();
+        showToast(`Side set to ${selectedSide} for ${idsArray.length} items`, false);
+    } catch (error) {
+        console.error('Bulk set side error:', error);
+        showToast('Error setting side', true);
+    }
+}
+
+// Reset selections when table reloads
+function resetSelectionsOnReload() {
+    // Keep track of which IDs were selected
+    const previouslySelected = new Set(selectedIds);
+
+    // After rows are rendered, re-check previously selected items that still exist
+    setTimeout(() => {
+        previouslySelected.forEach(dcId => {
+            const checkbox = document.querySelector(`#directTableBody .row-checkbox[data-dc-id="${dcId}"]`);
+            if (checkbox) {
+                checkbox.checked = true;
+            } else {
+                // Item no longer in view, remove from selection
+                selectedIds.delete(dcId);
+            }
+        });
+        updateBulkActionBar();
+        updateSelectAllCheckbox();
+    }, 100);
+}
 </script>
 
 <style>
@@ -2762,6 +3950,99 @@ function toggleKeyboardHelp() {
     border: 1px solid #d1d5db;
     border-radius: 4px;
     box-shadow: inset 0 -1px 0 #d1d5db;
+}
+
+/* Drawer selected row highlight */
+.drawer-selected {
+    outline: 2px solid #6366f1 !important;
+    outline-offset: -2px;
+    background-color: #eef2ff !important;
+}
+
+.drawer-selected td {
+    background-color: inherit;
+}
+
+/* Drawer transition */
+#detailsDrawer {
+    transition: width 0.3s ease-in-out;
+}
+
+/* ============================================================
+   Table Density Modes
+   ============================================================ */
+
+/* Comfortable (default) */
+#directTable.density-comfortable tbody td {
+    padding-top: 0.625rem;
+    padding-bottom: 0.625rem;
+}
+
+#directTable.density-comfortable tbody tr {
+    min-height: 48px;
+}
+
+/* Compact */
+#directTable.density-compact tbody td {
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
+    font-size: 0.8125rem;
+}
+
+#directTable.density-compact tbody tr {
+    min-height: 36px;
+}
+
+#directTable.density-compact .budget-select,
+#directTable.density-compact .side-select,
+#directTable.density-compact .searchable-dropdown-input {
+    padding: 0.25rem 0.375rem;
+    font-size: 0.8125rem;
+}
+
+#directTable.density-compact .save-btn,
+#directTable.density-compact .quick-accept-btn,
+#directTable.density-compact .delete-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.6875rem;
+}
+
+/* Ultra-compact */
+#directTable.density-ultra tbody td {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    font-size: 0.75rem;
+}
+
+#directTable.density-ultra tbody tr {
+    min-height: 28px;
+}
+
+#directTable.density-ultra .budget-select,
+#directTable.density-ultra .side-select,
+#directTable.density-ultra .searchable-dropdown-input {
+    padding: 0.125rem 0.25rem;
+    font-size: 0.75rem;
+    height: 24px;
+}
+
+#directTable.density-ultra .save-btn,
+#directTable.density-ultra .quick-accept-btn,
+#directTable.density-ultra .delete-btn {
+    padding: 0.125rem 0.375rem;
+    font-size: 0.625rem;
+}
+
+#directTable.density-ultra thead th {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    font-size: 0.75rem;
+}
+
+/* Status segmented control active state */
+.status-seg-btn.active {
+    background-color: white;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 </style>
 {% endblock %}

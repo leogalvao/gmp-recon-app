@@ -1847,6 +1847,7 @@ async def get_direct_cost_items(
     type_filter: Optional[str] = Query(None, description="Filter by type: L, M, S, O"),
     search: Optional[str] = Query(None, description="Search query"),
     confidence_band: Optional[str] = Query(None, description="Filter: high, medium, low"),
+    sort: Optional[str] = Query("confidence_desc", description="Sort: confidence_desc, amount_desc, date_desc, vendor_asc, cost_code_asc"),
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     db: Session = Depends(get_db)
@@ -1986,18 +1987,37 @@ async def get_direct_cost_items(
             or search_lower in str(d.get('Name', '')).lower()
         ]
 
-    # Sort: unmapped by confidence (high first), mapped by cost code
-    if status == 'unmapped':
-        filtered_items.sort(key=lambda x: (-x.get('confidence', 0), str(x.get('Cost Code', ''))))
-    elif status == 'mapped':
-        filtered_items.sort(key=lambda x: str(x.get('Cost Code', '')))
-    else:
-        # All: unmapped first (by confidence), then mapped
+    # Sort based on sort parameter
+    def get_sort_key(item, sort_option):
+        """Return sort key based on sort option."""
+        if sort_option == 'confidence_desc':
+            return (-item.get('confidence', 0), str(item.get('Cost Code', '')))
+        elif sort_option == 'amount_desc':
+            # Parse amount string to number for sorting
+            amt_str = str(item.get('Amount', '$0')).replace('$', '').replace(',', '')
+            try:
+                amt = float(amt_str) if amt_str else 0
+            except ValueError:
+                amt = 0
+            return (-amt, str(item.get('Cost Code', '')))
+        elif sort_option == 'date_desc':
+            return (str(item.get('Date', '0000-00-00'))[::-1], str(item.get('Cost Code', '')))
+        elif sort_option == 'vendor_asc':
+            return (str(item.get('Vendor', '')).lower(), str(item.get('Cost Code', '')))
+        elif sort_option == 'cost_code_asc':
+            return (str(item.get('Cost Code', '')), str(item.get('Name', '')))
+        else:
+            return (-item.get('confidence', 0), str(item.get('Cost Code', '')))
+
+    if status == 'all':
+        # All: unmapped first, then mapped (each sorted by selected option)
         unmapped = [d for d in filtered_items if not d['is_mapped']]
         mapped = [d for d in filtered_items if d['is_mapped']]
-        unmapped.sort(key=lambda x: (-x.get('confidence', 0), str(x.get('Cost Code', ''))))
-        mapped.sort(key=lambda x: str(x.get('Cost Code', '')))
+        unmapped.sort(key=lambda x: get_sort_key(x, sort or 'confidence_desc'))
+        mapped.sort(key=lambda x: get_sort_key(x, sort or 'confidence_desc'))
         filtered_items = unmapped + mapped
+    else:
+        filtered_items.sort(key=lambda x: get_sort_key(x, sort or 'confidence_desc'))
 
     # Count totals before pagination
     total_count = len(filtered_items)
@@ -2034,7 +2054,8 @@ async def get_direct_cost_items(
             'side': side,
             'type': type_filter,
             'search': search,
-            'confidence_band': confidence_band
+            'confidence_band': confidence_band,
+            'sort': sort
         }
     }
 
