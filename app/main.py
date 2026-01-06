@@ -580,6 +580,7 @@ async def mappings_page(
     request: Request,
     tab: str = "budget_to_gmp",
     side: Optional[str] = None,
+    initial_limit: int = 20,  # Initial rows to load (pagination)
     db: Session = Depends(get_db)
 ):
     """Mapping editor page with tabs for Budget→GMP, Direct→Budget, and Allocations."""
@@ -698,14 +699,20 @@ async def mappings_page(
         all_budget_items.append(item)
 
     # Separate mapped vs unmapped for display
-    unmapped_budget = [b for b in all_budget_items if not b['is_mapped']]
+    all_unmapped_budget = [b for b in all_budget_items if not b['is_mapped']]
     mapped_budget = [b for b in all_budget_items if b['is_mapped']]
 
     # Sort unmapped: items with suggestions first
-    unmapped_budget.sort(key=lambda x: (-float(x.get('suggestion_confidence', 0) or 0), str(x.get('Budget Code', '') or '')))
+    all_unmapped_budget.sort(key=lambda x: (-float(x.get('suggestion_confidence', 0) or 0), str(x.get('Budget Code', '') or '')))
 
-    # Count suggestions
-    suggested_budget = [b for b in unmapped_budget if b.get('suggested_gmp')]
+    # Count suggestions (before limiting)
+    suggested_budget = [b for b in all_unmapped_budget if b.get('suggested_gmp')]
+
+    # Store total counts before limiting for pagination
+    total_unmapped_budget = len(all_unmapped_budget)
+
+    # Limit for initial display (pagination)
+    unmapped_budget = all_unmapped_budget[:initial_limit]
 
     # Build direct cost mappings lookup from database
     direct_mappings_lookup = {}
@@ -782,20 +789,23 @@ async def mappings_page(
         all_direct_items.append(item)
 
     # Separate for stats
-    unmapped_direct = [d for d in all_direct_items if not d['is_mapped']]
+    all_unmapped_direct = [d for d in all_direct_items if not d['is_mapped']]
     mapped_direct = [d for d in all_direct_items if d['is_mapped']]
 
     # Sort unmapped by confidence (high first), mapped by cost code
-    unmapped_direct.sort(key=lambda x: (-x.get('confidence', 0), str(x.get('Cost Code', ''))))
+    all_unmapped_direct.sort(key=lambda x: (-x.get('confidence', 0), str(x.get('Cost Code', ''))))
     mapped_direct.sort(key=lambda x: str(x.get('Cost Code', '')))
 
-    # Limit unmapped for display (keep all mapped)
-    unmapped_direct = unmapped_direct[:500]
+    # Count by confidence band (before limiting)
+    direct_high = len([d for d in all_unmapped_direct if d.get('confidence_band') == 'high'])
+    direct_medium = len([d for d in all_unmapped_direct if d.get('confidence_band') == 'medium'])
+    direct_low = len([d for d in all_unmapped_direct if d.get('confidence_band') == 'low'])
 
-    # Count by confidence band
-    direct_high = len([d for d in unmapped_direct if d.get('confidence_band') == 'high'])
-    direct_medium = len([d for d in unmapped_direct if d.get('confidence_band') == 'medium'])
-    direct_low = len([d for d in unmapped_direct if d.get('confidence_band') == 'low'])
+    # Store total counts before limiting for pagination
+    total_unmapped_direct = len(all_unmapped_direct)
+
+    # Limit for initial display (pagination)
+    unmapped_direct = all_unmapped_direct[:initial_limit]
 
     return templates.TemplateResponse("mappings.html", {
         "request": request,
@@ -816,6 +826,12 @@ async def mappings_page(
         "direct_low": direct_low,
         "total_budget": len(all_budget_items),
         "total_direct": len(all_direct_items),
+        # Pagination info
+        "initial_limit": initial_limit,
+        "total_unmapped_budget": total_unmapped_budget,
+        "total_unmapped_direct": total_unmapped_direct,
+        "has_more_budget": total_unmapped_budget > initial_limit,
+        "has_more_direct": total_unmapped_direct > initial_limit,
         "active_page": "mappings"
     })
 
@@ -1822,6 +1838,357 @@ async def get_mappings(
             status_code=400,
             detail="mapping_type must be 'budget_to_gmp' or 'direct_to_budget'"
         )
+
+
+@app.get("/api/mappings/direct/items")
+async def get_direct_cost_items(
+    status: str = Query("unmapped", description="Filter: unmapped, mapped, or all"),
+    side: Optional[str] = Query(None, description="Filter by side: EAST, WEST, BOTH"),
+    type_filter: Optional[str] = Query(None, description="Filter by type: L, M, S, O"),
+    search: Optional[str] = Query(None, description="Search query"),
+    confidence_band: Optional[str] = Query(None, description="Filter: high, medium, low"),
+    limit: int = Query(20, ge=1, le=100, description="Items per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get paginated direct cost items with suggestions for the mappings page.
+    Returns enriched items with budget code suggestions and confidence scores.
+    """
+    data_loader = get_data_loader()
+
+    # Get existing mappings from database
+    direct_query = db.query(DirectToBudget)
+    if side:
+        side_upper = side.upper()
+        if side_upper in VALID_SIDES:
+            if side_upper != 'BOTH':
+                direct_query = direct_query.filter(DirectToBudget.side.in_([side_upper, 'BOTH']))
+            else:
+                direct_query = direct_query.filter(DirectToBudget.side == side_upper)
+
+    direct_mappings_db = direct_query.all()
+    direct_mappings_lookup = {}
+    for m in direct_mappings_db:
+        key = (m.cost_code, m.name)
+        direct_mappings_lookup[key] = {
+            'id': m.id,
+            'budget_code': m.budget_code,
+            'side': m.side,
+            'confidence': m.confidence
+        }
+
+    # Build budget description lookup
+    budget_desc_lookup = {}
+    for _, row in data_loader.budget.iterrows():
+        bc = row.get('Budget Code', '')
+        if bc:
+            budget_desc_lookup[bc] = row.get('Budget Code Description', '')
+
+    # Get direct costs dataframe
+    direct_df = data_loader.direct_costs.copy()
+
+    # Compute suggestions for unmapped items (only if needed)
+    if status in ['unmapped', 'all']:
+        budget_df = data_loader.budget.copy()
+        gmp_df = data_loader.gmp.copy()
+        mapped_budget_df = map_budget_to_gmp(budget_df, gmp_df, db)
+        mapped_direct_df = map_direct_to_budget(direct_df.copy(), mapped_budget_df, db)
+        unmapped_direct_df = mapped_direct_df[mapped_direct_df['mapped_budget_code'].isna()].copy()
+
+        dc_suggestions = compute_all_suggestions(
+            unmapped_direct_df,
+            data_loader.budget,
+            db,
+            unmapped_only=True,
+            top_k=3
+        )
+    else:
+        dc_suggestions = {}
+
+    # Build all items list
+    all_items = []
+    display_columns = ['Cost Code', 'Name', 'Vendor', 'Invoice', 'Date', 'Amount', 'Type']
+
+    for _, row in direct_df.iterrows():
+        dc_id = row.get('direct_cost_id', 0)
+        cost_code = row.get('Cost Code', '')
+        name = row.get('Name', '')
+        key = (cost_code, name)
+
+        item = {col: row.get(col, '') for col in display_columns if col in row.index}
+        item['direct_cost_id'] = dc_id
+
+        # Format amount for display
+        if 'amount_cents' in row.index:
+            item['Amount'] = cents_to_display(int(row['amount_cents']))
+        elif 'Amount' in row.index:
+            item['Amount'] = row['Amount']
+
+        # Check if mapped
+        if key in direct_mappings_lookup:
+            mapping = direct_mappings_lookup[key]
+            item['is_mapped'] = True
+            item['mapping_id'] = mapping['id']
+            item['mapped_budget_code'] = mapping['budget_code']
+            item['side'] = mapping['side']
+            item['mapping_confidence'] = mapping['confidence']
+            item['budget_description'] = budget_desc_lookup.get(mapping['budget_code'], '')
+            item['confidence_band'] = 'mapped'
+            item['suggestions'] = []
+            item['top_suggestion'] = None
+            item['confidence'] = 100
+        else:
+            item['is_mapped'] = False
+            item['side'] = 'BOTH'
+            item['mapped_budget_code'] = None
+            item['mapping_confidence'] = 0
+            item['budget_description'] = ''
+
+            # Add suggestions for unmapped items
+            suggs = dc_suggestions.get(dc_id, [])
+            if suggs:
+                item['suggestions'] = suggs
+                item['top_suggestion'] = suggs[0]
+                item['confidence'] = suggs[0].get('score', 0)
+                item['confidence_band'] = suggs[0].get('confidence_band', 'low')
+            else:
+                item['suggestions'] = []
+                item['top_suggestion'] = None
+                item['confidence'] = 0
+                item['confidence_band'] = 'low'
+
+        all_items.append(item)
+
+    # Apply status filter
+    if status == 'unmapped':
+        filtered_items = [d for d in all_items if not d['is_mapped']]
+    elif status == 'mapped':
+        filtered_items = [d for d in all_items if d['is_mapped']]
+    else:
+        filtered_items = all_items
+
+    # Apply type filter
+    if type_filter:
+        filtered_items = [d for d in filtered_items if d.get('Type', '') == type_filter]
+
+    # Apply confidence band filter
+    if confidence_band:
+        filtered_items = [d for d in filtered_items if d.get('confidence_band', '') == confidence_band]
+
+    # Apply search filter
+    if search:
+        search_lower = search.lower()
+        filtered_items = [
+            d for d in filtered_items
+            if search_lower in str(d.get('Vendor', '')).lower()
+            or search_lower in str(d.get('Cost Code', '')).lower()
+            or search_lower in str(d.get('Name', '')).lower()
+        ]
+
+    # Sort: unmapped by confidence (high first), mapped by cost code
+    if status == 'unmapped':
+        filtered_items.sort(key=lambda x: (-x.get('confidence', 0), str(x.get('Cost Code', ''))))
+    elif status == 'mapped':
+        filtered_items.sort(key=lambda x: str(x.get('Cost Code', '')))
+    else:
+        # All: unmapped first (by confidence), then mapped
+        unmapped = [d for d in filtered_items if not d['is_mapped']]
+        mapped = [d for d in filtered_items if d['is_mapped']]
+        unmapped.sort(key=lambda x: (-x.get('confidence', 0), str(x.get('Cost Code', ''))))
+        mapped.sort(key=lambda x: str(x.get('Cost Code', '')))
+        filtered_items = unmapped + mapped
+
+    # Count totals before pagination
+    total_count = len(filtered_items)
+    total_high = len([d for d in filtered_items if d.get('confidence_band') == 'high' and not d['is_mapped']])
+    total_medium = len([d for d in filtered_items if d.get('confidence_band') == 'medium' and not d['is_mapped']])
+    total_low = len([d for d in filtered_items if d.get('confidence_band') == 'low' and not d['is_mapped']])
+    total_mapped = len([d for d in filtered_items if d['is_mapped']])
+
+    # Apply pagination
+    paginated_items = filtered_items[offset:offset + limit]
+    has_more = (offset + limit) < total_count
+
+    # Sanitize items to handle NaN and numpy types
+    sanitized_items = [convert_numpy_types(item) for item in paginated_items]
+
+    return {
+        'items': sanitized_items,
+        'pagination': {
+            'offset': offset,
+            'limit': limit,
+            'total': total_count,
+            'hasMore': has_more,
+            'nextOffset': offset + limit if has_more else None
+        },
+        'stats': {
+            'total': total_count,
+            'high': total_high,
+            'medium': total_medium,
+            'low': total_low,
+            'mapped': total_mapped
+        },
+        'filters': {
+            'status': status,
+            'side': side,
+            'type': type_filter,
+            'search': search,
+            'confidence_band': confidence_band
+        }
+    }
+
+
+@app.get("/api/mappings/budget/items")
+async def get_budget_mapping_items(
+    status: str = Query("unmapped", description="Filter: unmapped, mapped, or all"),
+    side: Optional[str] = Query(None, description="Filter by side: EAST, WEST, BOTH"),
+    search: Optional[str] = Query(None, description="Search query"),
+    limit: int = Query(20, ge=1, le=100, description="Items per page"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get paginated budget items for Budget→GMP mapping page.
+    Returns enriched items with GMP division suggestions.
+    """
+    from rapidfuzz import fuzz, process
+
+    data_loader = get_data_loader()
+
+    # Get GMP options
+    gmp_options = data_loader.gmp['GMP'].tolist()
+
+    # Get existing mappings from database
+    budget_query = db.query(BudgetToGMP)
+    if side:
+        side_upper = side.upper()
+        if side_upper in VALID_SIDES:
+            if side_upper != 'BOTH':
+                budget_query = budget_query.filter(BudgetToGMP.side.in_([side_upper, 'BOTH']))
+            else:
+                budget_query = budget_query.filter(BudgetToGMP.side == side_upper)
+
+    budget_mappings_db = budget_query.all()
+    mapped_budget_codes = set()
+    budget_side_lookup = {}
+    budget_mappings_lookup = {}
+
+    for m in budget_mappings_db:
+        mapped_budget_codes.add(m.budget_code)
+        budget_side_lookup[m.budget_code] = m.side
+        budget_mappings_lookup[m.budget_code] = {
+            'id': m.id,
+            'gmp_division': m.gmp_division,
+            'side': m.side,
+            'confidence': m.confidence
+        }
+
+    # Build all budget items
+    budget_df = data_loader.budget.copy()
+    gmp_df = data_loader.gmp.copy()
+    mapped_budget_df = map_budget_to_gmp(budget_df, gmp_df, db)
+
+    all_items = []
+    for _, row in mapped_budget_df.iterrows():
+        bc = row.get('Budget Code', '')
+        desc = row.get('Budget Code Description', '')
+        # Handle NaN descriptions
+        if desc is None or (isinstance(desc, float) and desc != desc):
+            desc = ''
+        else:
+            desc = str(desc).strip()
+
+        item = {
+            'Budget Code': bc,
+            'Budget Code Description': desc,
+            'Cost Type': row.get('Cost Type', ''),
+            'side': budget_side_lookup.get(bc, 'BOTH'),
+        }
+
+        # Check if mapped
+        if bc in mapped_budget_codes:
+            mapping = budget_mappings_lookup[bc]
+            item['is_mapped'] = True
+            item['mapping_id'] = mapping['id']
+            item['gmp_division'] = mapping['gmp_division']
+            item['mapping_method'] = 'database'
+            item['mapping_confidence'] = mapping['confidence']
+        elif row.get('gmp_division') is not None:
+            item['is_mapped'] = True
+            item['gmp_division'] = row.get('gmp_division')
+            item['mapping_method'] = row.get('mapping_method', 'auto')
+            item['mapping_confidence'] = row.get('mapping_confidence', 0)
+        else:
+            item['is_mapped'] = False
+            item['gmp_division'] = None
+            item['mapping_method'] = 'unmapped'
+            item['mapping_confidence'] = 0
+
+            # Add suggestion for unmapped items
+            if desc and len(desc) > 3:
+                match = process.extractOne(desc, gmp_options, scorer=fuzz.token_set_ratio)
+                if match and match[1] >= 60:
+                    item['suggested_gmp'] = match[0]
+                    item['suggestion_confidence'] = match[1]
+
+        all_items.append(item)
+
+    # Apply status filter
+    if status == 'unmapped':
+        filtered_items = [b for b in all_items if not b['is_mapped']]
+    elif status == 'mapped':
+        filtered_items = [b for b in all_items if b['is_mapped']]
+    else:
+        filtered_items = all_items
+
+    # Apply search filter
+    if search:
+        search_lower = search.lower()
+        filtered_items = [
+            b for b in filtered_items
+            if search_lower in str(b.get('Budget Code', '')).lower()
+            or search_lower in str(b.get('Budget Code Description', '')).lower()
+        ]
+
+    # Sort: unmapped with suggestions first
+    if status == 'unmapped':
+        filtered_items.sort(key=lambda x: (-float(x.get('suggestion_confidence', 0) or 0), str(x.get('Budget Code', '') or '')))
+    else:
+        filtered_items.sort(key=lambda x: str(x.get('Budget Code', '') or ''))
+
+    # Count totals
+    total_count = len(filtered_items)
+    total_with_suggestions = len([b for b in filtered_items if b.get('suggested_gmp') and not b['is_mapped']])
+    total_mapped = len([b for b in filtered_items if b['is_mapped']])
+
+    # Apply pagination
+    paginated_items = filtered_items[offset:offset + limit]
+    has_more = (offset + limit) < total_count
+
+    # Sanitize items to handle NaN and numpy types
+    sanitized_items = [convert_numpy_types(item) for item in paginated_items]
+
+    return {
+        'items': sanitized_items,
+        'pagination': {
+            'offset': offset,
+            'limit': limit,
+            'total': total_count,
+            'hasMore': has_more,
+            'nextOffset': offset + limit if has_more else None
+        },
+        'stats': {
+            'total': total_count,
+            'with_suggestions': total_with_suggestions,
+            'mapped': total_mapped
+        },
+        'filters': {
+            'status': status,
+            'side': side,
+            'search': search
+        }
+    }
 
 
 @app.patch("/api/mappings/{mapping_type}/{mapping_id}/side")

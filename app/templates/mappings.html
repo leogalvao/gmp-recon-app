@@ -203,10 +203,26 @@
             </table>
         </div>
 
+        <!-- Load More Button for Budget→GMP -->
+        {% if has_more_budget %}
+        <div id="budgetLoadMoreContainer" class="flex justify-center items-center gap-4 py-4 border-t">
+            <button onclick="loadMoreBudgetItems()" id="loadMoreBudgetBtn"
+                    class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                </svg>
+                Load More
+            </button>
+            <span class="text-sm text-gray-500" id="budgetLoadedCount">
+                Showing {{ unmapped_budget|length }} of {{ total_unmapped_budget }} unmapped items
+            </span>
+        </div>
+        {% endif %}
+
         {% if unmapped_budget %}
         <div class="flex justify-between items-center">
             <span class="text-sm text-gray-500">
-                {{ unmapped_budget|length }} items need mapping
+                {{ total_unmapped_budget }} items need mapping
             </span>
             <button onclick="acceptAllSuggested()" class="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors">
                 Accept All Suggestions ({{ suggested_budget|length }})
@@ -573,9 +589,25 @@
             </table>
         </div>
 
+        <!-- Load More Button for Direct→Budget -->
+        {% if has_more_direct %}
+        <div id="directLoadMoreContainer" class="flex justify-center items-center gap-4 py-4 border-t">
+            <button onclick="loadMoreDirectItems()" id="loadMoreDirectBtn"
+                    class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                </svg>
+                Load More
+            </button>
+            <span class="text-sm text-gray-500" id="directLoadedCount">
+                Showing <span id="directLoadedNum">{{ unmapped_direct|length }}</span> of {{ total_unmapped_direct }} unmapped items
+            </span>
+        </div>
+        {% endif %}
+
         <!-- Footer Info -->
         <div class="flex justify-between items-center text-sm text-gray-500">
-            <span>{{ unmapped_direct|length }} unmapped, {{ mapped_direct|length }} mapped</span>
+            <span>{{ total_unmapped_direct }} unmapped, {{ mapped_direct|length }} mapped</span>
             <span>Total: {{ total_direct }} direct cost items</span>
         </div>
 
@@ -1728,6 +1760,394 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize keyboard shortcuts
     initKeyboardShortcuts();
 });
+
+// ============================================================
+// Pagination - Load More Functionality
+// ============================================================
+
+const paginationState = {
+    direct: {
+        offset: {{ unmapped_direct|length }},
+        total: {{ total_unmapped_direct }},
+        loading: false,
+        limit: 20
+    },
+    budget: {
+        offset: {{ unmapped_budget|length }},
+        total: {{ total_unmapped_budget }},
+        loading: false,
+        limit: 20
+    }
+};
+
+// Get current filters for API calls
+function getCurrentFilters() {
+    const sideFilter = document.getElementById('filterDirectSide')?.value ||
+                       document.getElementById('filterSide')?.value || '';
+    return {
+        side: sideFilter,
+        status: 'unmapped'
+    };
+}
+
+// Load more direct cost items
+async function loadMoreDirectItems() {
+    if (paginationState.direct.loading) return;
+    if (paginationState.direct.offset >= paginationState.direct.total) return;
+
+    const btn = document.getElementById('loadMoreDirectBtn');
+    const loadedNum = document.getElementById('directLoadedNum');
+
+    try {
+        paginationState.direct.loading = true;
+        btn.disabled = true;
+        btn.innerHTML = `
+            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Loading...
+        `;
+
+        const filters = getCurrentFilters();
+        const params = new URLSearchParams({
+            status: 'unmapped',
+            offset: paginationState.direct.offset,
+            limit: paginationState.direct.limit,
+            ...(filters.side && { side: filters.side })
+        });
+
+        const response = await fetch(`/api/mappings/direct/items?${params}`);
+        const data = await response.json();
+
+        if (data.items && data.items.length > 0) {
+            appendDirectRows(data.items);
+            paginationState.direct.offset += data.items.length;
+
+            // Update loaded count
+            if (loadedNum) {
+                loadedNum.textContent = paginationState.direct.offset;
+            }
+
+            // Initialize searchable dropdowns for new rows
+            initSearchableDropdowns();
+
+            // Update keyboard navigation rows
+            updateMappingRows();
+        }
+
+        // Hide button if no more items
+        if (!data.pagination.hasMore) {
+            document.getElementById('directLoadMoreContainer').style.display = 'none';
+        }
+
+    } catch (error) {
+        console.error('Error loading more items:', error);
+        showToast('Error loading more items', 'error');
+    } finally {
+        paginationState.direct.loading = false;
+        btn.disabled = false;
+        btn.innerHTML = `
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+            </svg>
+            Load More
+        `;
+    }
+}
+
+// Append direct cost rows to the table
+function appendDirectRows(items) {
+    const tbody = document.getElementById('directTableBody');
+    if (!tbody) return;
+
+    // Find insertion point (before mapped items)
+    const mappedRows = tbody.querySelectorAll('tr[data-status="mapped"]');
+    const insertBefore = mappedRows.length > 0 ? mappedRows[0] : null;
+
+    items.forEach(item => {
+        const row = createDirectRow(item);
+        if (insertBefore) {
+            tbody.insertBefore(row, insertBefore);
+        } else {
+            tbody.appendChild(row);
+        }
+    });
+}
+
+// Create a direct cost table row from item data
+function createDirectRow(item) {
+    const tr = document.createElement('tr');
+    const confBand = item.confidence_band || 'low';
+    const topSugg = item.top_suggestion;
+
+    tr.className = `hover:bg-blue-50 transition-colors ${confBand === 'high' ? 'bg-green-50' : confBand === 'medium' ? 'bg-yellow-50' : ''}`;
+    tr.dataset.status = 'unmapped';
+    tr.dataset.dcId = item.direct_cost_id || '';
+    tr.dataset.code = item['Cost Code'] || '';
+    tr.dataset.name = item.Name || '';
+    tr.dataset.vendor = item.Vendor || '';
+    tr.dataset.type = item.Type || '';
+    tr.dataset.confidence = item.confidence || 0;
+    tr.dataset.band = confBand;
+
+    const vendorStr = (item.Vendor && typeof item.Vendor === 'string') ? item.Vendor : '';
+    const nameStr = (item.Name && typeof item.Name === 'string') ? item.Name : '';
+    const typeCode = item.Type || '';
+
+    // Build suggestions options HTML
+    let optionsHtml = '<option value="">-- Select Budget --</option>';
+    if (topSugg) {
+        const suggDesc = topSugg.description || '';
+        const suggDescDisplay = suggDesc.length > 35 ? suggDesc.substring(0, 35) + '...' : suggDesc;
+        optionsHtml += `<option value="${topSugg.budget_code || ''}" selected class="font-medium" title="${suggDesc}">★ ${topSugg.budget_code || ''} – ${suggDescDisplay || '(No description)'} (${Math.round(topSugg.score || 0)}%)</option>`;
+
+        // Add alternative suggestions
+        if (item.suggestions && item.suggestions.length > 1) {
+            item.suggestions.slice(1).forEach(sugg => {
+                const altDesc = sugg.description || '';
+                const altDescDisplay = altDesc.length > 30 ? altDesc.substring(0, 30) + '...' : altDesc;
+                optionsHtml += `<option value="${sugg.budget_code || ''}" title="${altDesc}">${sugg.budget_code || ''} – ${altDescDisplay || '(No desc)'} (${Math.round(sugg.score || 0)}%)</option>`;
+            });
+            optionsHtml += '<option disabled>──────────</option>';
+        }
+    }
+    // Add all budget options (will be handled by searchable dropdown)
+    {% for bc in budget_options %}
+    optionsHtml += `<option value="{{ bc.code }}" title="{{ bc.description }}">{{ bc.display }}</option>`;
+    {% endfor %}
+
+    const confidenceBadgeClass = confBand === 'high' ? 'bg-green-100 text-green-800' :
+                                  confBand === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-gray-100 text-gray-600';
+
+    tr.innerHTML = `
+        <td class="px-3 py-2 text-gray-600 max-w-32 truncate" title="${vendorStr}">${(vendorStr || 'N/A').substring(0, 20)}</td>
+        <td class="px-3 py-2"><span class="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">${item['Cost Code'] || ''}</span></td>
+        <td class="px-3 py-2 text-gray-600">
+            <span class="truncate block max-w-48" title="${nameStr}">${(nameStr || 'N/A').substring(0, 35)}${nameStr.length > 35 ? '...' : ''}</span>
+        </td>
+        <td class="px-3 py-2 text-right font-mono text-sm">${item.Amount || ''}</td>
+        <td class="px-3 py-2 text-center">
+            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${
+                typeCode === 'L' ? 'bg-blue-100 text-blue-700' :
+                typeCode === 'M' ? 'bg-purple-100 text-purple-700' :
+                typeCode === 'S' ? 'bg-orange-100 text-orange-700' :
+                'bg-gray-100 text-gray-700'
+            }">${typeCode || '?'}</span>
+        </td>
+        <td class="px-3 py-2">
+            <div class="flex items-center gap-2">
+                ${topSugg ? `
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold shrink-0 ${confidenceBadgeClass}">${Math.round(item.confidence || 0)}%</span>
+                ` : `
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 shrink-0">Manual</span>
+                `}
+                <select class="budget-select flex-1 border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 min-w-80 ${
+                    confBand === 'high' ? 'border-green-300' :
+                    confBand === 'medium' ? 'border-yellow-300' :
+                    !topSugg ? 'border-red-300' : ''
+                }"
+                    data-dc-id="${item.direct_cost_id || ''}"
+                    data-cost-code="${item['Cost Code'] || ''}"
+                    data-name="${item.Name || ''}"
+                    data-vendor="${item.Vendor || ''}"
+                    data-suggested="${topSugg ? topSugg.budget_code : ''}"
+                    data-score="${item.confidence || 0}"
+                    data-original=""
+                    onchange="enableSaveButton(this)"
+                    aria-label="Select budget code">
+                    ${optionsHtml}
+                </select>
+            </div>
+        </td>
+        <td class="px-3 py-2 text-center">
+            <select class="side-select border rounded px-1 py-0.5 text-xs"
+                    data-dc-id="${item.direct_cost_id || ''}"
+                    data-cost-code="${item['Cost Code'] || ''}"
+                    data-name="${item.Name || ''}">
+                <option value="BOTH" selected>Both</option>
+                <option value="EAST">East</option>
+                <option value="WEST">West</option>
+            </select>
+        </td>
+        <td class="px-3 py-2 text-center">
+            <span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">unmapped</span>
+        </td>
+        <td class="px-3 py-2 text-center">
+            <div class="flex gap-1 justify-center">
+                ${confBand === 'high' && topSugg ? `
+                <button onclick="quickAccept(this)"
+                        class="quick-accept-btn px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors flex items-center gap-1"
+                        title="Accept ${topSugg.budget_code} (${Math.round(item.confidence || 0)}%)"
+                        data-budget-code="${topSugg.budget_code}">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                    Accept
+                </button>
+                ` : `
+                <button onclick="saveDirectMapping(this)"
+                        class="save-btn px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                        ${!topSugg ? 'disabled' : ''}>
+                    Save
+                </button>
+                `}
+            </div>
+        </td>
+    `;
+
+    return tr;
+}
+
+// Load more budget items
+async function loadMoreBudgetItems() {
+    if (paginationState.budget.loading) return;
+    if (paginationState.budget.offset >= paginationState.budget.total) return;
+
+    const btn = document.getElementById('loadMoreBudgetBtn');
+    const container = document.getElementById('budgetLoadMoreContainer');
+
+    try {
+        paginationState.budget.loading = true;
+        btn.disabled = true;
+        btn.innerHTML = `
+            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Loading...
+        `;
+
+        const sideFilter = document.getElementById('filterSide')?.value || '';
+        const params = new URLSearchParams({
+            status: 'unmapped',
+            offset: paginationState.budget.offset,
+            limit: paginationState.budget.limit,
+            ...(sideFilter && { side: sideFilter })
+        });
+
+        const response = await fetch(`/api/mappings/budget/items?${params}`);
+        const data = await response.json();
+
+        if (data.items && data.items.length > 0) {
+            appendBudgetRows(data.items);
+            paginationState.budget.offset += data.items.length;
+
+            // Update loaded count
+            const countSpan = container.querySelector('#budgetLoadedCount');
+            if (countSpan) {
+                countSpan.textContent = `Showing ${paginationState.budget.offset} of ${paginationState.budget.total} unmapped items`;
+            }
+        }
+
+        // Hide button if no more items
+        if (!data.pagination.hasMore) {
+            container.style.display = 'none';
+        }
+
+    } catch (error) {
+        console.error('Error loading more budget items:', error);
+        showToast('Error loading more items', 'error');
+    } finally {
+        paginationState.budget.loading = false;
+        btn.disabled = false;
+        btn.innerHTML = `
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+            </svg>
+            Load More
+        `;
+    }
+}
+
+// Append budget rows to the table
+function appendBudgetRows(items) {
+    const table = document.getElementById('budgetTable');
+    if (!table) return;
+
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+
+    // Find insertion point (before mapped items)
+    const mappedRows = tbody.querySelectorAll('tr[data-status="mapped"]');
+    const insertBefore = mappedRows.length > 0 ? mappedRows[0] : null;
+
+    items.forEach(item => {
+        const row = createBudgetRow(item);
+        if (insertBefore) {
+            tbody.insertBefore(row, insertBefore);
+        } else {
+            tbody.appendChild(row);
+        }
+    });
+}
+
+// Create a budget table row from item data
+function createBudgetRow(item) {
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-blue-50 transition-colors';
+    tr.dataset.status = 'unmapped';
+    tr.dataset.code = item['Budget Code'] || '';
+    tr.dataset.desc = item['Budget Code Description'] || '';
+
+    const budgetCode = item['Budget Code'] || '';
+    const desc = item['Budget Code Description'] || '';
+    const descDisplay = desc.length > 50 ? desc.substring(0, 50) + '...' : desc;
+    const costType = item['Cost Type'] || '';
+    const suggestedGmp = item.suggested_gmp || '';
+    const suggestionConf = item.suggestion_confidence || 0;
+
+    // Build GMP options
+    let optionsHtml = '<option value="">-- Select GMP Division --</option>';
+    if (suggestedGmp) {
+        optionsHtml += `<option value="${suggestedGmp}" class="bg-yellow-100" selected>★ ${suggestedGmp} (${Math.round(suggestionConf)}%)</option>`;
+    }
+    {% for gmp in gmp_options %}
+    if ('{{ gmp }}' !== suggestedGmp) {
+        optionsHtml += `<option value="{{ gmp }}">{{ gmp }}</option>`;
+    }
+    {% endfor %}
+
+    tr.innerHTML = `
+        <td class="px-4 py-3">
+            <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded">${budgetCode}</span>
+        </td>
+        <td class="px-4 py-3 text-gray-600 text-sm">
+            <span title="${desc}">${descDisplay || 'N/A'}</span>
+        </td>
+        <td class="px-4 py-3 text-center">
+            <span class="text-xs text-gray-500">${costType.substring(0, 10)}</span>
+        </td>
+        <td class="px-4 py-3">
+            <select class="gmp-select w-full border rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+                    data-budget-code="${budgetCode}"
+                    onchange="enableSaveButton(this)">
+                ${optionsHtml}
+            </select>
+        </td>
+        <td class="px-4 py-3 text-center">
+            <select class="side-select border rounded px-1 py-0.5 text-xs"
+                    data-budget-code="${budgetCode}">
+                <option value="BOTH" selected>Both</option>
+                <option value="EAST">East</option>
+                <option value="WEST">West</option>
+            </select>
+        </td>
+        <td class="px-4 py-3 text-center">
+            <span class="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700">unmapped</span>
+        </td>
+        <td class="px-4 py-3 text-center">
+            <button onclick="saveMapping(this, 'budget_to_gmp')"
+                    class="save-btn px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                    disabled>
+                Save
+            </button>
+        </td>
+    `;
+
+    return tr;
+}
 
 // ============================================================
 // Keyboard Shortcuts for Mapping Workflow
