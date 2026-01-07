@@ -1007,15 +1007,22 @@ async def bulk_accept_suggestions(
     direct_df = data_loader.direct_costs.copy()
     budget_df = data_loader.budget.copy()
 
-    # Filter to unmapped only
-    direct_df = map_direct_to_budget(direct_df, budget_df, db)
-    unmapped_df = direct_df[direct_df['mapped_budget_code'].isna()].copy()
+    # Get existing mappings from database
+    existing_mappings = db.query(DirectToBudget).all()
+    mapped_keys = {(m.cost_code, m.name) for m in existing_mappings}
+
+    # Filter to unmapped only (not in database)
+    unmapped_mask = direct_df.apply(
+        lambda row: (row.get('Cost Code', ''), row.get('Name', '')) not in mapped_keys,
+        axis=1
+    )
+    unmapped_df = direct_df[unmapped_mask].copy()
 
     if direct_cost_ids:
         unmapped_df = unmapped_df[unmapped_df['direct_cost_id'].isin(direct_cost_ids)]
 
     # Compute suggestions
-    suggestions = compute_all_suggestions(unmapped_df, budget_df, db, top_k=1)
+    suggestions = compute_all_suggestions(unmapped_df, budget_df, db, unmapped_only=False, top_k=1)
 
     accepted = 0
     skipped = 0
