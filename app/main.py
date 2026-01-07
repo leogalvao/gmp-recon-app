@@ -753,13 +753,18 @@ async def mappings_page(
             'confidence': m.confidence
         }
 
-    # Compute suggestions for ALL direct costs (for unmapped ones)
-    unmapped_direct_df = direct_df[direct_df['mapped_budget_code'].isna()].copy()
+    # Compute suggestions for unmapped direct costs (not in database)
+    mapped_keys = set(direct_mappings_lookup.keys())
+    unmapped_mask = data_loader.direct_costs.apply(
+        lambda row: (row.get('Cost Code', ''), row.get('Name', '')) not in mapped_keys,
+        axis=1
+    )
+    unmapped_direct_df = data_loader.direct_costs[unmapped_mask].copy()
     dc_suggestions = compute_all_suggestions(
         unmapped_direct_df,
         data_loader.budget,
         db,
-        unmapped_only=True,
+        unmapped_only=False,  # Already filtered to unmapped
         top_k=3
     )
 
@@ -2005,19 +2010,23 @@ async def get_direct_cost_items(
     # Get direct costs dataframe
     direct_df = data_loader.direct_costs.copy()
 
+    # Get set of mapped (cost_code, name) pairs from database
+    mapped_keys = set(direct_mappings_lookup.keys())
+
     # Compute suggestions for unmapped items (only if needed)
     if status in ['unmapped', 'all']:
-        budget_df = data_loader.budget.copy()
-        gmp_df = data_loader.gmp.copy()
-        mapped_budget_df = map_budget_to_gmp(budget_df, gmp_df, db)
-        mapped_direct_df = map_direct_to_budget(direct_df.copy(), mapped_budget_df, db)
-        unmapped_direct_df = mapped_direct_df[mapped_direct_df['mapped_budget_code'].isna()].copy()
+        # Filter to items NOT in database mappings
+        unmapped_mask = direct_df.apply(
+            lambda row: (row.get('Cost Code', ''), row.get('Name', '')) not in mapped_keys,
+            axis=1
+        )
+        unmapped_direct_df = direct_df[unmapped_mask].copy()
 
         dc_suggestions = compute_all_suggestions(
             unmapped_direct_df,
             data_loader.budget,
             db,
-            unmapped_only=True,
+            unmapped_only=False,  # Already filtered to unmapped
             top_k=3
         )
     else:
