@@ -1526,22 +1526,24 @@ async def update_forecast_params(
     EVM params: { "evm_performance_factor": 1.0 }
     PERT params: { "pert_optimistic_cents": X, "pert_most_likely_cents": Y, "pert_pessimistic_cents": Z }
     Parametric: { "param_quantity": N, "param_unit_rate_cents": X, "param_complexity_factor": 1.0 }
-    General: { "distribution_method": "linear|front_loaded|back_loaded", "completion_date": "2026-06-30" }
+    General: { "distribution_method": "linear|front_loaded|back_loaded|s_curve",
+               "start_date": "2024-09-05", "completion_date": "2026-06-30" }
     """
     body = await request.json()
 
-    # Validate and convert date if present
-    if 'completion_date' in body and body['completion_date']:
-        try:
-            body['completion_date'] = datetime.fromisoformat(body['completion_date'])
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format. Use ISO format (YYYY-MM-DD)")
+    # Validate and convert dates if present
+    for date_field in ['start_date', 'completion_date']:
+        if date_field in body and body[date_field]:
+            try:
+                body[date_field] = datetime.fromisoformat(body[date_field])
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid {date_field} format. Use ISO format (YYYY-MM-DD)")
 
     # Whitelist of allowed parameters
     allowed_params = {
         'evm_performance_factor', 'pert_optimistic_cents', 'pert_most_likely_cents',
         'pert_pessimistic_cents', 'param_quantity', 'param_unit_rate_cents',
-        'param_complexity_factor', 'distribution_method', 'completion_date',
+        'param_complexity_factor', 'distribution_method', 'start_date', 'completion_date',
         'is_locked', 'notes'
     }
 
@@ -1641,14 +1643,26 @@ async def refresh_forecast(
     if hasattr(as_of_date, 'to_pydatetime'):
         as_of_date = as_of_date.to_pydatetime()
 
-    if not division_direct.empty and 'Date' in division_direct.columns:
-        start_date = pd.to_datetime(division_direct['Date'].min())
-        if hasattr(start_date, 'to_pydatetime'):
-            start_date = start_date.to_pydatetime()
+    config = manager.get_or_create_config(gmp_division)
+
+    # Determine start_date with priority:
+    # 1. Config override (user-specified)
+    # 2. Earliest transaction date from ALL direct costs (project-wide)
+    # 3. Fallback to Jan 1, 2025
+    if config.start_date:
+        start_date = config.start_date
+    elif not direct_costs_df.empty and 'date_parsed' in direct_costs_df.columns:
+        # Use ALL direct costs to get true project start, not just mapped ones
+        valid_dates = direct_costs_df['date_parsed'].dropna()
+        if not valid_dates.empty:
+            start_date = valid_dates.min()
+            if hasattr(start_date, 'to_pydatetime'):
+                start_date = start_date.to_pydatetime()
+        else:
+            start_date = datetime(2025, 1, 1)
     else:
         start_date = datetime(2025, 1, 1)
 
-    config = manager.get_or_create_config(gmp_division)
     if config.completion_date:
         end_date = config.completion_date
     else:

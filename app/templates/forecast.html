@@ -787,7 +787,17 @@
                     <option value="linear" {% if config.distribution_method == 'linear' %}selected{% endif %}>Linear (Equal)</option>
                     <option value="front_loaded" {% if config.distribution_method == 'front_loaded' %}selected{% endif %}>Front Loaded</option>
                     <option value="back_loaded" {% if config.distribution_method == 'back_loaded' %}selected{% endif %}>Back Loaded</option>
+                    <option value="s_curve" {% if config.distribution_method == 's_curve' %}selected{% endif %}>S-Curve (Realistic)</option>
                 </select>
+                <div class="text-xs text-gray-500 mt-1">S-Curve creates a realistic construction spend pattern</div>
+            </div>
+
+            <!-- Start Date -->
+            <div class="param-group">
+                <label class="param-label">Start Date</label>
+                <input type="date" name="start_date" class="param-input"
+                       value="{{ config.start_date[:10] if config.start_date else '' }}">
+                <div class="text-xs text-gray-500 mt-1">Leave blank to use earliest transaction date</div>
             </div>
 
             <!-- Completion Date -->
@@ -1078,6 +1088,12 @@ async function saveSettings() {
 
     // Distribution method
     params.distribution_method = formData.get('distribution_method');
+
+    // Start date
+    const startDate = formData.get('start_date');
+    if (startDate) {
+        params.start_date = startDate;
+    }
 
     // Completion date
     const completionDate = formData.get('completion_date');
