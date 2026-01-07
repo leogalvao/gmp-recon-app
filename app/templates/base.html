@@ -163,6 +163,51 @@
         {% block content %}{% endblock %}
     </main>
     
+    <!-- CSRF Protection Scripts -->
+    <script>
+        // Get CSRF token from cookie
+        function getCsrfToken() {
+            const cookies = document.cookie.split(';');
+            for (const cookie of cookies) {
+                const [name, value] = cookie.trim().split('=');
+                if (name === 'csrf_token') {
+                    return decodeURIComponent(value);
+                }
+            }
+            return null;
+        }
+
+        // CSRF-protected fetch wrapper
+        async function secureFetch(url, options = {}) {
+            const csrfToken = getCsrfToken();
+            const method = (options.method || 'GET').toUpperCase();
+
+            // Add CSRF header for state-changing requests
+            if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+                options.headers = {
+                    ...options.headers,
+                    'X-CSRF-Token': csrfToken
+                };
+            }
+
+            return fetch(url, options);
+        }
+
+        // Override jQuery ajax to include CSRF token
+        if (typeof $ !== 'undefined' && $.ajaxSetup) {
+            $.ajaxSetup({
+                beforeSend: function(xhr, settings) {
+                    if (!(/^(GET|HEAD|OPTIONS)$/.test(settings.type))) {
+                        xhr.setRequestHeader('X-CSRF-Token', getCsrfToken());
+                    }
+                }
+            });
+        }
+
+        // Store CSRF token for forms (fallback)
+        window.CSRF_TOKEN = getCsrfToken();
+    </script>
+
     <!-- Footer -->
     <footer class="bg-white border-t mt-auto py-4">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -171,7 +216,7 @@
             </p>
         </div>
     </footer>
-    
+
     {% block extra_scripts %}{% endblock %}
 </body>
 </html>

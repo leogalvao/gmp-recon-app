@@ -240,69 +240,74 @@ $(document).ready(function() {
 });
 
 function showDetails(dup) {
-    const content = `
-        <div class="space-y-4">
-            <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <div class="text-sm text-gray-500">Row ID</div>
-                    <div class="font-medium">${dup.row_id}</div>
-                </div>
-                <div>
-                    <div class="text-sm text-gray-500">Group ID</div>
-                    <div class="font-medium">${dup.group_id}</div>
-                </div>
-                <div>
-                    <div class="text-sm text-gray-500">Detection Method</div>
-                    <div class="font-medium capitalize">${dup.method}</div>
-                </div>
-                <div>
-                    <div class="text-sm text-gray-500">Confidence Score</div>
-                    <div class="font-medium">${dup.score}</div>
-                </div>
-            </div>
-            <hr>
-            <div class="space-y-3">
-                <div>
-                    <div class="text-sm text-gray-500">Cost Code</div>
-                    <div class="font-mono bg-gray-100 px-2 py-1 rounded inline-block">${dup.cost_code || '—'}</div>
-                </div>
-                <div>
-                    <div class="text-sm text-gray-500">Vendor</div>
-                    <div class="font-medium">${dup.vendor || '—'}</div>
-                </div>
-                <div>
-                    <div class="text-sm text-gray-500">Invoice #</div>
-                    <div class="font-medium">${dup.invoice || '—'}</div>
-                </div>
-                <div>
-                    <div class="text-sm text-gray-500">Amount</div>
-                    <div class="font-medium font-mono">${dup.amount}</div>
-                </div>
-                <div>
-                    <div class="text-sm text-gray-500">Date</div>
-                    <div class="font-medium">${dup.date || '—'}</div>
-                </div>
-                <div>
-                    <div class="text-sm text-gray-500">Name</div>
-                    <div class="font-medium">${dup.name || '—'}</div>
-                </div>
-                <div>
-                    <div class="text-sm text-gray-500">Description</div>
-                    <div class="text-gray-700">${dup.description || '—'}</div>
-                </div>
-            </div>
-            ${dup.matched_with && dup.matched_with.length > 0 ? `
-            <hr>
-            <div>
-                <div class="text-sm text-gray-500 mb-2">Matched With Row IDs</div>
-                <div class="flex flex-wrap gap-2">
-                    ${dup.matched_with.map(id => `<span class="badge badge-blue">${id}</span>`).join('')}
-                </div>
-            </div>
-            ` : ''}
-        </div>
-    `;
-    document.getElementById('modal-content').innerHTML = content;
+    // Security: Use DOM manipulation instead of innerHTML to prevent XSS
+    const container = document.getElementById('modal-content');
+    container.textContent = '';  // Clear safely
+
+    // Helper: Create element with text content (XSS-safe)
+    const createEl = (tag, text, className = '') => {
+        const el = document.createElement(tag);
+        el.textContent = text;  // textContent auto-escapes HTML
+        if (className) el.className = className;
+        return el;
+    };
+
+    // Helper: Create label-value row
+    const createField = (label, value, valueClass = 'font-medium') => {
+        const row = document.createElement('div');
+        row.appendChild(createEl('div', label, 'text-sm text-gray-500'));
+        row.appendChild(createEl('div', value || '—', valueClass));
+        return row;
+    };
+
+    // Main container
+    const wrapper = document.createElement('div');
+    wrapper.className = 'space-y-4';
+
+    // Grid section (row_id, group_id, method, score)
+    const grid = document.createElement('div');
+    grid.className = 'grid grid-cols-2 gap-4';
+    grid.appendChild(createField('Row ID', dup.row_id));
+    grid.appendChild(createField('Group ID', dup.group_id));
+    grid.appendChild(createField('Detection Method', dup.method, 'font-medium capitalize'));
+    grid.appendChild(createField('Confidence Score', dup.score));
+    wrapper.appendChild(grid);
+
+    wrapper.appendChild(document.createElement('hr'));
+
+    // Details section
+    const details = document.createElement('div');
+    details.className = 'space-y-3';
+
+    // Cost Code with special styling
+    const costCodeRow = document.createElement('div');
+    costCodeRow.appendChild(createEl('div', 'Cost Code', 'text-sm text-gray-500'));
+    costCodeRow.appendChild(createEl('div', dup.cost_code || '—', 'font-mono bg-gray-100 px-2 py-1 rounded inline-block'));
+    details.appendChild(costCodeRow);
+
+    details.appendChild(createField('Vendor', dup.vendor));
+    details.appendChild(createField('Invoice #', dup.invoice));
+    details.appendChild(createField('Amount', dup.amount, 'font-medium font-mono'));
+    details.appendChild(createField('Date', dup.date));
+    details.appendChild(createField('Name', dup.name));
+    details.appendChild(createField('Description', dup.description, 'text-gray-700'));
+    wrapper.appendChild(details);
+
+    // Matched With section (if applicable)
+    if (dup.matched_with && dup.matched_with.length > 0) {
+        wrapper.appendChild(document.createElement('hr'));
+        const matchedSection = document.createElement('div');
+        matchedSection.appendChild(createEl('div', 'Matched With Row IDs', 'text-sm text-gray-500 mb-2'));
+        const badgeContainer = document.createElement('div');
+        badgeContainer.className = 'flex flex-wrap gap-2';
+        dup.matched_with.forEach(id => {
+            badgeContainer.appendChild(createEl('span', id, 'badge badge-blue'));
+        });
+        matchedSection.appendChild(badgeContainer);
+        wrapper.appendChild(matchedSection);
+    }
+
+    container.appendChild(wrapper);
     document.getElementById('detail-modal').classList.remove('hidden');
 }
 

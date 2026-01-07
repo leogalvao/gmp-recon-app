@@ -57,6 +57,7 @@ from app.modules.forecasting import (
     calculate_evm, calculate_pert, calculate_parametric
 )
 from app.models import ForecastConfig, ForecastSnapshot, ForecastPeriod, ForecastAuditLog
+from app.modules.csrf import csrf, get_or_create_csrf_token
 
 
 # Initialize FastAPI app
@@ -77,6 +78,43 @@ def format_currency(value):
     return value
 
 templates.env.filters['currency'] = format_currency
+
+
+# CSRF Middleware - sets token cookie and validates POST requests
+@app.middleware("http")
+async def csrf_middleware(request: Request, call_next):
+    """
+    CSRF protection middleware.
+
+    - Sets CSRF token cookie if not present
+    - Validates CSRF token for state-changing requests (POST, PUT, DELETE)
+    - Exempt: /api/* endpoints (for external API consumers with their own auth)
+    """
+    response = await call_next(request)
+
+    # Set CSRF token cookie if not present
+    if csrf.cookie_name not in request.cookies:
+        token = csrf.generate_token()
+        response.set_cookie(
+            key=csrf.cookie_name,
+            value=token,
+            httponly=False,  # JS needs to read for AJAX
+            samesite="strict",
+            secure=False,  # Set True in production with HTTPS
+            max_age=3600
+        )
+
+    return response
+
+
+# Add csrf_token to all template contexts
+def get_template_context(request: Request, **kwargs) -> dict:
+    """Build template context with CSRF token included."""
+    return {
+        "request": request,
+        "csrf_token": get_or_create_csrf_token(request),
+        **kwargs
+    }
 
 
 def convert_numpy_types(obj):
