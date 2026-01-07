@@ -630,8 +630,43 @@ def validate_tie_outs(
 
 
 # =============================================================================
-# Schedule-Based Forecast Calculations
+# Schedule-Based Forecast Calculations (P6 Algorithm)
 # =============================================================================
+
+# Constants for P6 weighting
+CRITICAL_PATH_MULTIPLIER = 2.0  # Weight multiplier for critical path activities (TF=0)
+MIN_PROGRESS_THRESHOLD = 0.01   # 1% minimum progress to avoid division by tiny numbers
+
+
+def compute_activity_weight(
+    activity,
+    mapping_weight: float = 1.0
+) -> float:
+    """
+    Compute activity weight using P6-style algorithm.
+
+    Weight formula: base_weight × critical_multiplier × duration_factor
+
+    Args:
+        activity: ScheduleActivity instance
+        mapping_weight: User-assigned weight from mapping (0.0-1.0)
+
+    Returns:
+        float: Composite weight for this activity
+    """
+    # Base weight from mapping
+    base_weight = mapping_weight
+
+    # Critical path multiplier (2x for TF=0)
+    critical_multiplier = CRITICAL_PATH_MULTIPLIER if activity.is_critical else 1.0
+
+    # Duration-based factor (longer activities count more)
+    # Use square root to dampen extreme values
+    duration = activity.duration_days or 1
+    duration_factor = (duration / 10) ** 0.5  # Normalize around 10-day activities
+
+    return base_weight * critical_multiplier * duration_factor
+
 
 def compute_schedule_based_forecast(
     db: Session,
@@ -640,12 +675,22 @@ def compute_schedule_based_forecast(
     actual_cents: int
 ) -> Dict:
     """
-    Compute schedule-based EAC for a GMP division using mapped schedule activities.
+    Compute schedule-based EAC for a GMP division using P6-style progress.
 
-    Uses Earned Value Management (EVM) concepts:
-    - Schedule Progress (SP) = weighted average of activity % complete
-    - Schedule Performance Index (SPI) = SP / time elapsed (if dates available)
-    - EAC = Budget × (Actuals / Schedule Progress)
+    P6 Algorithm:
+    1. Progress Source: Uses progress_pct derived from date actuals (" A" suffix)
+       - Complete (both dates actual): progress = 1.0
+       - In Progress (start actual): progress = elapsed_days / duration
+       - Not Started (neither actual): progress = 0.0
+
+    2. Weighting: Combines three factors:
+       - User-assigned mapping weight (0.0-1.0)
+       - Critical path multiplier (2x for Total Float = 0)
+       - Duration-based factor (longer activities count more)
+
+    3. EAC Calculation:
+       - EAC = Budget × (Actuals / Schedule_Progress) when progress > 1%
+       - Guards: Cap at 3x budget, floor at actual spend
 
     Args:
         db: Database session
@@ -659,8 +704,9 @@ def compute_schedule_based_forecast(
         - estimated_completion: date or None
         - activities: list of contributing activities
         - has_schedule_data: bool
+        - p6_stats: dict with P6-specific metrics
     """
-    from datetime import date
+    from datetime import date, timedelta
     from ..models import ScheduleToGMPMapping
 
     # Get schedule mappings for this division
@@ -671,14 +717,22 @@ def compute_schedule_based_forecast(
     if not mappings:
         return {
             'weighted_progress': 0.0,
-            'schedule_eac_cents': actual_cents,
+            'schedule_eac_cents': max(actual_cents, budget_cents),
+            'schedule_eac_display': cents_to_display(max(actual_cents, budget_cents)),
             'estimated_completion': None,
             'activities': [],
             'has_schedule_data': False,
-            'activity_count': 0
+            'activity_count': 0,
+            'p6_stats': {
+                'complete_count': 0,
+                'in_progress_count': 0,
+                'not_started_count': 0,
+                'critical_count': 0,
+                'total_duration_days': 0
+            }
         }
 
-    # Calculate weighted progress
+    # Calculate weighted progress using P6 algorithm
     total_weight = 0.0
     weighted_sum = 0.0
     activities = []
@@ -686,13 +740,41 @@ def compute_schedule_based_forecast(
     latest_finish = None
     today = date.today()
 
+    # P6 stats tracking
+    complete_count = 0
+    in_progress_count = 0
+    not_started_count = 0
+    critical_count = 0
+    total_duration_days = 0
+
     for m in mappings:
         activity = m.activity
-        weight = m.weight
-        progress = activity.pct_complete / 100.0
+
+        # Use P6 progress_pct if available, fallback to pct_complete
+        if hasattr(activity, 'progress_pct') and activity.progress_pct is not None:
+            progress = activity.progress_pct
+        else:
+            progress = activity.pct_complete / 100.0
+
+        # Compute composite weight using P6 algorithm
+        weight = compute_activity_weight(activity, m.weight)
 
         weighted_sum += weight * progress
         total_weight += weight
+
+        # Track P6 stats
+        if hasattr(activity, 'is_complete') and activity.is_complete:
+            complete_count += 1
+        elif hasattr(activity, 'is_in_progress') and activity.is_in_progress:
+            in_progress_count += 1
+        else:
+            not_started_count += 1
+
+        if hasattr(activity, 'is_critical') and activity.is_critical:
+            critical_count += 1
+
+        if activity.duration_days:
+            total_duration_days += activity.duration_days
 
         # Track dates
         if activity.start_date and (earliest_start is None or activity.start_date < earliest_start):
@@ -702,9 +784,15 @@ def compute_schedule_based_forecast(
 
         activities.append({
             'task_name': activity.task_name,
+            'activity_id': activity.activity_id or '',
             'pct_complete': activity.pct_complete,
-            'weight': weight,
-            'contribution': weight * progress,
+            'progress_pct': round(progress * 100, 1),
+            'weight': round(weight, 3),
+            'contribution': round(weight * progress * 100, 1),
+            'is_complete': getattr(activity, 'is_complete', False),
+            'is_in_progress': getattr(activity, 'is_in_progress', False),
+            'is_critical': getattr(activity, 'is_critical', False),
+            'duration_days': activity.duration_days,
             'start_date': activity.start_date.isoformat() if activity.start_date else None,
             'finish_date': activity.finish_date.isoformat() if activity.finish_date else None
         })
@@ -712,17 +800,23 @@ def compute_schedule_based_forecast(
     # Weighted progress (0-100)
     weighted_progress = (weighted_sum / total_weight * 100) if total_weight > 0 else 0.0
 
-    # Compute schedule-based EAC
-    # If progress > 0: EAC = Actuals / Progress
-    # This assumes actuals should be proportional to progress
-    if weighted_progress > 0:
-        schedule_eac_cents = int(actual_cents / (weighted_progress / 100.0))
-    else:
-        # No progress yet - use budget as EAC
-        schedule_eac_cents = budget_cents
+    # Compute schedule-based EAC with guards
+    schedule_eac_cents = budget_cents  # Default to budget
 
-    # Cap EAC at a reasonable multiple of budget (e.g., 2x) to avoid outliers
-    schedule_eac_cents = min(schedule_eac_cents, budget_cents * 2)
+    if weighted_progress >= MIN_PROGRESS_THRESHOLD * 100:
+        # EAC = Budget × (Actuals / Progress)
+        progress_ratio = weighted_progress / 100.0
+        if progress_ratio > 0:
+            schedule_eac_cents = int(actual_cents / progress_ratio)
+
+            # Guard 1: Cap at 3x budget to avoid extreme outliers
+            schedule_eac_cents = min(schedule_eac_cents, budget_cents * 3)
+
+            # Guard 2: Floor at actual spend (can't forecast less than already spent)
+            schedule_eac_cents = max(schedule_eac_cents, actual_cents)
+    else:
+        # Progress too low - use budget as EAC
+        schedule_eac_cents = max(budget_cents, actual_cents)
 
     # Estimate completion date based on current progress rate
     estimated_completion = None
@@ -733,10 +827,15 @@ def compute_schedule_based_forecast(
             rate = weighted_progress / days_elapsed
             remaining_progress = 100 - weighted_progress
             days_remaining = int(remaining_progress / rate) if rate > 0 else 365
-            from datetime import timedelta
+            # Cap at reasonable horizon (2 years)
+            days_remaining = min(days_remaining, 730)
             estimated_completion = today + timedelta(days=days_remaining)
-    elif weighted_progress >= 100 and latest_finish:
-        estimated_completion = latest_finish
+    elif weighted_progress >= 100:
+        # Complete - use latest finish date
+        estimated_completion = latest_finish or today
+
+    # Sort activities by contribution (descending)
+    activities.sort(key=lambda x: -x['contribution'])
 
     return {
         'weighted_progress': round(weighted_progress, 1),
@@ -747,41 +846,87 @@ def compute_schedule_based_forecast(
         'has_schedule_data': True,
         'activity_count': len(activities),
         'earliest_start': earliest_start.isoformat() if earliest_start else None,
-        'latest_finish': latest_finish.isoformat() if latest_finish else None
+        'latest_finish': latest_finish.isoformat() if latest_finish else None,
+        'p6_stats': {
+            'complete_count': complete_count,
+            'in_progress_count': in_progress_count,
+            'not_started_count': not_started_count,
+            'critical_count': critical_count,
+            'total_duration_days': total_duration_days,
+            'total_weight': round(total_weight, 2)
+        }
     }
 
 
 def compute_project_schedule_summary(db: Session) -> Dict:
     """
-    Compute project-wide schedule summary.
+    Compute project-wide schedule summary with P6 metrics.
 
     Returns:
         - total_activities: int
         - mapped_activities: int
         - unmapped_activities: int
-        - avg_progress: float
+        - avg_progress: float (weighted by P6 algorithm)
         - earliest_start: date
         - latest_finish: date
         - by_division: list of division summaries
+        - p6_stats: P6-specific metrics
     """
     from ..models import ScheduleActivity, ScheduleToGMPMapping
 
     activities = db.query(ScheduleActivity).all()
 
     total_activities = len(activities)
-    total_progress = sum(a.pct_complete for a in activities)
-    avg_progress = total_progress / total_activities if total_activities > 0 else 0
+
+    # P6 stats tracking
+    complete_count = 0
+    in_progress_count = 0
+    not_started_count = 0
+    critical_count = 0
+    total_duration_days = 0
+
+    # Calculate weighted progress using P6 progress_pct
+    total_weight = 0.0
+    weighted_sum = 0.0
 
     # Find date range
     earliest_start = None
     latest_finish = None
+
     for a in activities:
+        # Use P6 progress_pct if available
+        if hasattr(a, 'progress_pct') and a.progress_pct is not None:
+            progress = a.progress_pct
+        else:
+            progress = a.pct_complete / 100.0
+
+        # Compute weight (use default for project-wide summary)
+        weight = compute_activity_weight(a, 1.0)
+        weighted_sum += weight * progress
+        total_weight += weight
+
+        # Track P6 stats
+        if hasattr(a, 'is_complete') and a.is_complete:
+            complete_count += 1
+        elif hasattr(a, 'is_in_progress') and a.is_in_progress:
+            in_progress_count += 1
+        else:
+            not_started_count += 1
+
+        if hasattr(a, 'is_critical') and a.is_critical:
+            critical_count += 1
+
+        if a.duration_days:
+            total_duration_days += a.duration_days
+
         if a.start_date:
             if earliest_start is None or a.start_date < earliest_start:
                 earliest_start = a.start_date
         if a.finish_date:
             if latest_finish is None or a.finish_date > latest_finish:
                 latest_finish = a.finish_date
+
+    avg_progress = (weighted_sum / total_weight * 100) if total_weight > 0 else 0
 
     # Count mapped vs unmapped
     mapped_ids = set(
@@ -791,20 +936,43 @@ def compute_project_schedule_summary(db: Session) -> Dict:
     mapped_activities = sum(1 for a in activities if a.id in mapped_ids)
     unmapped_activities = total_activities - mapped_activities
 
-    # Group by GMP division
+    # Group by GMP division with P6 weighting
     division_summaries = {}
     for m in db.query(ScheduleToGMPMapping).all():
         div = m.gmp_division
+        activity = m.activity
+
+        # Use P6 progress_pct
+        if hasattr(activity, 'progress_pct') and activity.progress_pct is not None:
+            progress = activity.progress_pct
+        else:
+            progress = activity.pct_complete / 100.0
+
+        # Compute P6 weight
+        weight = compute_activity_weight(activity, m.weight)
+
         if div not in division_summaries:
             division_summaries[div] = {
                 'gmp_division': div,
                 'activity_count': 0,
                 'total_weight': 0.0,
-                'weighted_progress': 0.0
+                'weighted_progress': 0.0,
+                'complete_count': 0,
+                'in_progress_count': 0,
+                'critical_count': 0
             }
+
         division_summaries[div]['activity_count'] += 1
-        division_summaries[div]['total_weight'] += m.weight
-        division_summaries[div]['weighted_progress'] += m.weight * (m.activity.pct_complete / 100.0)
+        division_summaries[div]['total_weight'] += weight
+        division_summaries[div]['weighted_progress'] += weight * progress
+
+        if getattr(activity, 'is_complete', False):
+            division_summaries[div]['complete_count'] += 1
+        elif getattr(activity, 'is_in_progress', False):
+            division_summaries[div]['in_progress_count'] += 1
+
+        if getattr(activity, 'is_critical', False):
+            division_summaries[div]['critical_count'] += 1
 
     # Finalize weighted progress
     by_division = []
@@ -824,5 +992,13 @@ def compute_project_schedule_summary(db: Session) -> Dict:
         'avg_progress': round(avg_progress, 1),
         'earliest_start': earliest_start.isoformat() if earliest_start else None,
         'latest_finish': latest_finish.isoformat() if latest_finish else None,
-        'by_division': by_division
+        'by_division': by_division,
+        'p6_stats': {
+            'complete_count': complete_count,
+            'in_progress_count': in_progress_count,
+            'not_started_count': not_started_count,
+            'critical_count': critical_count,
+            'total_duration_days': total_duration_days,
+            'total_weight': round(total_weight, 2)
+        }
     }

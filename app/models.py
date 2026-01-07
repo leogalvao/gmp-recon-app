@@ -438,6 +438,11 @@ class ScheduleActivity(Base):
     """
     Project schedule activities from Gantt/P6 export.
     Tracks task progress for schedule-based EAC calculation.
+
+    P6 Date Format: "DD-Mon-YY[ A]" where " A" suffix indicates actual date
+    - Both dates have " A": activity is COMPLETE (progress = 1.0)
+    - Only start has " A": activity is IN_PROGRESS (progress = elapsed/duration)
+    - Neither date has " A": activity is NOT_STARTED (progress = 0.0)
     """
     __tablename__ = 'schedule_activities'
 
@@ -447,14 +452,31 @@ class ScheduleActivity(Base):
     source_uid = Column(String(100), unique=True, nullable=True)  # P6 GUID
     activity_id = Column(String(50), index=True)
     wbs = Column(String(100), index=True)
-    pct_complete = Column(Integer, default=0)  # 0-100
+    pct_complete = Column(Integer, default=0)  # 0-100 (explicit if provided)
 
     # Schedule dates for time-based forecasting
-    start_date = Column(Date, nullable=True)
-    finish_date = Column(Date, nullable=True)
-    planned_start = Column(Date, nullable=True)
-    planned_finish = Column(Date, nullable=True)
+    start_date = Column(Date, nullable=True)  # Current/actual start
+    finish_date = Column(Date, nullable=True)  # Current/actual finish
+    planned_start = Column(Date, nullable=True)  # Baseline start
+    planned_finish = Column(Date, nullable=True)  # Baseline finish
     duration_days = Column(Integer, nullable=True)
+
+    # P6-specific: Track whether dates are actuals (had " A" suffix)
+    start_is_actual = Column(Boolean, default=False)  # Start date had " A" suffix
+    finish_is_actual = Column(Boolean, default=False)  # Finish date had " A" suffix
+
+    # P6 derived progress state (computed from date suffixes)
+    is_complete = Column(Boolean, default=False)  # Both dates actual
+    is_in_progress = Column(Boolean, default=False)  # Only start is actual
+    progress_pct = Column(Float, default=0.0)  # 0.0-1.0 computed progress
+
+    # Critical path weighting
+    total_float = Column(Integer, nullable=True)  # 0 = critical path
+    is_critical = Column(Boolean, default=False)  # total_float == 0
+
+    # GMP mapping source tracking
+    mapping_source = Column(String(30), default='manual')  # manual, prefix_match, keyword_match, fuzzy_match
+    mapping_confidence = Column(Float, default=1.0)  # 0.0-1.0
 
     imported_at = Column(DateTime, default=datetime.utcnow)
     source_file = Column(String(100))

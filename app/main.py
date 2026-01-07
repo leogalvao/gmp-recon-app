@@ -1162,18 +1162,37 @@ async def data_health_page(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/schedule", response_class=HTMLResponse)
 async def schedule_page(request: Request, db: Session = Depends(get_db)):
-    """Schedule to GMP mapping page."""
+    """Schedule to GMP mapping page with P6 progress tracking."""
     # Get all schedule activities with their mappings
     activities = db.query(ScheduleActivity).order_by(ScheduleActivity.row_number).all()
     activities_data = []
-    total_progress = 0
     mapped_count = 0
+
+    # P6 stats tracking
+    complete_count = 0
+    in_progress_count = 0
+    critical_count = 0
+    total_weight = 0.0
+    weighted_progress_sum = 0.0
 
     for act in activities:
         mappings = [
             {'gmp_division': m.gmp_division, 'weight': m.weight}
             for m in act.mappings
         ]
+
+        # Use P6 progress_pct if available, fallback to pct_complete
+        progress_pct = getattr(act, 'progress_pct', None)
+        if progress_pct is None:
+            progress_pct = act.pct_complete / 100.0
+
+        # Compute weight for progress calculation
+        is_critical = getattr(act, 'is_critical', False)
+        duration = act.duration_days or 1
+        weight = (2.0 if is_critical else 1.0) * ((duration / 10) ** 0.5)
+        total_weight += weight
+        weighted_progress_sum += weight * progress_pct
+
         activities_data.append({
             'id': act.id,
             'row_number': act.row_number,
@@ -1181,12 +1200,28 @@ async def schedule_page(request: Request, db: Session = Depends(get_db)):
             'activity_id': act.activity_id,
             'wbs': act.wbs,
             'pct_complete': act.pct_complete,
+            'progress_pct': progress_pct,
             'start_date': act.start_date.isoformat() if act.start_date else None,
             'finish_date': act.finish_date.isoformat() if act.finish_date else None,
+            'start_is_actual': getattr(act, 'start_is_actual', False),
+            'finish_is_actual': getattr(act, 'finish_is_actual', False),
+            'is_complete': getattr(act, 'is_complete', False),
+            'is_in_progress': getattr(act, 'is_in_progress', False),
+            'is_critical': is_critical,
+            'total_float': getattr(act, 'total_float', None),
             'duration_days': act.duration_days,
             'mappings': mappings
         })
-        total_progress += act.pct_complete
+
+        # Track P6 stats
+        if getattr(act, 'is_complete', False):
+            complete_count += 1
+        elif getattr(act, 'is_in_progress', False):
+            in_progress_count += 1
+
+        if is_critical:
+            critical_count += 1
+
         if mappings:
             mapped_count += 1
 
@@ -1195,7 +1230,8 @@ async def schedule_page(request: Request, db: Session = Depends(get_db)):
     gmp_divisions = data_loader.gmp['GMP'].tolist() if not data_loader.gmp.empty else []
 
     total_activities = len(activities_data)
-    avg_progress = round(total_progress / total_activities) if total_activities > 0 else 0
+    # Weighted average progress (P6-style)
+    avg_progress = round(weighted_progress_sum / total_weight * 100) if total_weight > 0 else 0
 
     return templates.TemplateResponse("schedule.html", {
         "request": request,
@@ -1205,6 +1241,9 @@ async def schedule_page(request: Request, db: Session = Depends(get_db)):
         "mapped_activities": mapped_count,
         "unmapped_activities": total_activities - mapped_count,
         "avg_progress": avg_progress,
+        "complete_count": complete_count,
+        "in_progress_count": in_progress_count,
+        "critical_count": critical_count,
         "active_page": "schedule"
     })
 

@@ -565,25 +565,288 @@ def get_max_transaction_date(direct_costs_df: pd.DataFrame) -> datetime:
 
 
 # =============================================================================
-# Schedule ETL Module (Task 6)
+# Schedule ETL Module (Task 6) - P6 Format Support
 # =============================================================================
+
+# Activity ID prefix → GMP division mapping
+ACTIVITY_PREFIX_TO_GMP = {
+    'SITE': 'Sitework',
+    'STRUCT': 'Concrete',
+    'CONC': 'Concrete',
+    'MASO': 'Masonry',
+    'MASON': 'Masonry',
+    'STEEL': 'Steel',
+    'CARP': 'Carpentry',
+    'WOOD': 'Carpentry',
+    'ROOF': 'Roofing',
+    'ELEC': 'Electrical & Fire Alarm',
+    'FIRE': 'Electrical & Fire Alarm',
+    'PLUM': 'Plumbing & H.V.A.C',
+    'HVAC': 'Plumbing & H.V.A.C',
+    'MECH': 'Plumbing & H.V.A.C',
+    'DOOR': 'Doors & Hardware',
+    'HARD': 'Doors & Hardware',
+    'GLASS': 'Glass & Glazing',
+    'GLAZ': 'Glass & Glazing',
+    'DRYWALL': 'Drywall',
+    'DRY': 'Drywall',
+    'FLOOR': 'Flooring',
+    'TILE': 'Flooring',
+    'PAINT': 'Painting',
+    'SPEC': 'Specialties',
+    'EQUIP': 'Equipment',
+    'EQPT': 'Equipment',
+}
+
+# Keyword patterns for GMP division matching
+ACTIVITY_KEYWORDS_TO_GMP = {
+    'excavat': 'Sitework',
+    'grading': 'Sitework',
+    'asphalt': 'Sitework',
+    'paving': 'Sitework',
+    'landscap': 'Sitework',
+    'concrete': 'Concrete',
+    'foundation': 'Concrete',
+    'slab': 'Concrete',
+    'footing': 'Concrete',
+    'formwork': 'Concrete',
+    'rebar': 'Concrete',
+    'masonry': 'Masonry',
+    'brick': 'Masonry',
+    'block': 'Masonry',
+    'cmu': 'Masonry',
+    'steel': 'Steel',
+    'structural steel': 'Steel',
+    'erect': 'Steel',
+    'framing': 'Carpentry',
+    'rough carpentry': 'Carpentry',
+    'wood': 'Carpentry',
+    'roof': 'Roofing',
+    'membrane': 'Roofing',
+    'flashing': 'Roofing',
+    'electrical': 'Electrical & Fire Alarm',
+    'fire alarm': 'Electrical & Fire Alarm',
+    'conduit': 'Electrical & Fire Alarm',
+    'wiring': 'Electrical & Fire Alarm',
+    'plumbing': 'Plumbing & H.V.A.C',
+    'piping': 'Plumbing & H.V.A.C',
+    'hvac': 'Plumbing & H.V.A.C',
+    'ductwork': 'Plumbing & H.V.A.C',
+    'mechanical': 'Plumbing & H.V.A.C',
+    'door': 'Doors & Hardware',
+    'hardware': 'Doors & Hardware',
+    'glass': 'Glass & Glazing',
+    'glazing': 'Glass & Glazing',
+    'window': 'Glass & Glazing',
+    'curtain wall': 'Glass & Glazing',
+    'drywall': 'Drywall',
+    'gypsum': 'Drywall',
+    'partition': 'Drywall',
+    'flooring': 'Flooring',
+    'carpet': 'Flooring',
+    'tile': 'Flooring',
+    'vct': 'Flooring',
+    'paint': 'Painting',
+    'coating': 'Painting',
+    'finish': 'Painting',
+}
+
+
+def parse_p6_date(val: str) -> Tuple[Optional['datetime.date'], bool]:
+    """
+    Parse P6 date format: "DD-Mon-YY[ A]"
+    The " A" suffix indicates an actual (recorded) date.
+
+    Args:
+        val: Date string from P6 export
+
+    Returns:
+        Tuple of (date, is_actual) where is_actual is True if " A" suffix present
+    """
+    if pd.isna(val) or val is None:
+        return (None, False)
+
+    s = str(val).strip()
+    if not s:
+        return (None, False)
+
+    # Check for " A" suffix (P6 actual date marker)
+    is_actual = s.endswith(' A')
+    if is_actual:
+        s = s[:-2].strip()  # Remove " A" suffix
+
+    # Try various date formats
+    date_formats = [
+        '%d-%b-%y',      # P6 format: 01-Jan-25
+        '%d-%B-%y',      # Full month: 01-January-25
+        '%d-%b-%Y',      # 01-Jan-2025
+        '%m/%d/%Y',      # US format: 01/15/2025
+        '%Y-%m-%d',      # ISO format: 2025-01-15
+        '%m/%d/%y',      # Short US: 01/15/25
+    ]
+
+    for fmt in date_formats:
+        try:
+            parsed = datetime.strptime(s, fmt).date()
+            return (parsed, is_actual)
+        except ValueError:
+            continue
+
+    # Fallback to pandas parser
+    try:
+        parsed = pd.to_datetime(s).date()
+        return (parsed, is_actual)
+    except (ValueError, TypeError):
+        return (None, False)
+
+
+def compute_p6_progress(
+    start_is_actual: bool,
+    finish_is_actual: bool,
+    start_date: Optional['datetime.date'],
+    finish_date: Optional['datetime.date'],
+    duration_days: Optional[int],
+    as_of_date: Optional['datetime.date'] = None
+) -> Tuple[bool, bool, float]:
+    """
+    Compute P6-style progress from date actuals.
+
+    P6 Logic:
+    - Both dates actual → COMPLETE (progress = 1.0)
+    - Only start actual → IN_PROGRESS (progress = elapsed / duration)
+    - Neither actual → NOT_STARTED (progress = 0.0)
+
+    Args:
+        start_is_actual: Start date had " A" suffix
+        finish_is_actual: Finish date had " A" suffix
+        start_date: Parsed start date
+        finish_date: Parsed finish date
+        duration_days: Activity duration in days
+        as_of_date: Reference date for elapsed calculation (defaults to today)
+
+    Returns:
+        Tuple of (is_complete, is_in_progress, progress_pct)
+    """
+    from datetime import date
+
+    if as_of_date is None:
+        as_of_date = date.today()
+
+    # Case 1: Both dates have actuals → Complete
+    if start_is_actual and finish_is_actual:
+        return (True, False, 1.0)
+
+    # Case 2: Only start is actual → In Progress
+    if start_is_actual and not finish_is_actual:
+        if start_date is None:
+            return (False, True, 0.0)
+
+        # Calculate elapsed days
+        elapsed = (as_of_date - start_date).days
+        elapsed = max(0, elapsed)  # Don't allow negative
+
+        # Determine duration
+        if duration_days and duration_days > 0:
+            duration = duration_days
+        elif finish_date and start_date:
+            duration = (finish_date - start_date).days
+            duration = max(1, duration)  # Avoid division by zero
+        else:
+            duration = 1  # Default to avoid division by zero
+
+        progress = min(1.0, elapsed / duration)
+        return (False, True, progress)
+
+    # Case 3: Neither actual → Not Started
+    return (False, False, 0.0)
+
+
+def match_activity_to_gmp(
+    activity_id: str,
+    task_name: str,
+    gmp_divisions: List[str]
+) -> Tuple[Optional[str], str, float]:
+    """
+    Match an activity to a GMP division using prefix rules and keywords.
+
+    Matching priority:
+    1. Activity ID prefix match (highest confidence)
+    2. Task name keyword match (medium confidence)
+    3. Fuzzy match against GMP division names (lower confidence)
+
+    Args:
+        activity_id: P6 Activity ID (e.g., "CONC-001")
+        task_name: Activity description
+        gmp_divisions: List of valid GMP division names
+
+    Returns:
+        Tuple of (gmp_division, source, confidence) where:
+        - gmp_division: Matched GMP division or None
+        - source: 'prefix_match', 'keyword_match', 'fuzzy_match', or 'none'
+        - confidence: 0.0-1.0
+    """
+    if not gmp_divisions:
+        return (None, 'none', 0.0)
+
+    # Build lookup for exact GMP name matching
+    gmp_lower = {gmp.lower(): gmp for gmp in gmp_divisions}
+
+    # 1. Try prefix match on Activity ID
+    if activity_id:
+        activity_upper = activity_id.upper()
+        for prefix, gmp_name in ACTIVITY_PREFIX_TO_GMP.items():
+            if activity_upper.startswith(prefix):
+                # Find matching GMP division
+                gmp_name_lower = gmp_name.lower()
+                if gmp_name_lower in gmp_lower:
+                    return (gmp_lower[gmp_name_lower], 'prefix_match', 0.95)
+                # Try partial match
+                for gmp_key, gmp_val in gmp_lower.items():
+                    if gmp_name_lower in gmp_key or gmp_key in gmp_name_lower:
+                        return (gmp_val, 'prefix_match', 0.90)
+
+    # 2. Try keyword match on task name
+    if task_name:
+        task_lower = task_name.lower()
+        for keyword, gmp_name in ACTIVITY_KEYWORDS_TO_GMP.items():
+            if keyword in task_lower:
+                gmp_name_lower = gmp_name.lower()
+                if gmp_name_lower in gmp_lower:
+                    return (gmp_lower[gmp_name_lower], 'keyword_match', 0.80)
+                # Try partial match
+                for gmp_key, gmp_val in gmp_lower.items():
+                    if gmp_name_lower in gmp_key or gmp_key in gmp_name_lower:
+                        return (gmp_val, 'keyword_match', 0.75)
+
+    # 3. Fuzzy match as fallback
+    if RAPIDFUZZ_AVAILABLE and task_name:
+        combined = f"{activity_id} {task_name}".strip()
+        matched_div, score = match_single_to_gmp(combined, gmp_divisions, score_cutoff=60)
+        if matched_div:
+            return (matched_div, 'fuzzy_match', score / 100.0)
+
+    return (None, 'none', 0.0)
+
 
 def load_schedule_csv(path: Optional[Path] = None) -> pd.DataFrame:
     """
     Load project schedule CSV export (from P6, MS Project, or similar).
     Returns DataFrame suitable for ScheduleActivity model.
 
+    Supports P6 date format: "DD-Mon-YY[ A]" where " A" suffix indicates actual date.
+
     Expected CSV columns (flexible naming):
         - Task Name / Activity Name / Name
         - Activity ID / Task ID / ID
         - WBS / WBS Code
-        - % Complete / Percent Complete / Progress
+        - % Complete / Percent Complete / Progress (optional, derived from dates in P6)
         - UID / Unique ID / GUID (optional)
-        - Start / Start Date / Actual Start (optional)
-        - Finish / Finish Date / Actual Finish (optional)
+        - Start / Start Date / Actual Start (may have " A" suffix)
+        - Finish / Finish Date / Actual Finish (may have " A" suffix)
         - Planned Start / Baseline Start (optional)
         - Planned Finish / Baseline Finish (optional)
         - Duration / Duration Days (optional)
+        - Total Float / Float (optional, for critical path)
 
     Returns DataFrame with:
         - row_number: int (original row order)
@@ -591,19 +854,28 @@ def load_schedule_csv(path: Optional[Path] = None) -> pd.DataFrame:
         - source_uid: str (unique identifier if available)
         - activity_id: str
         - wbs: str
-        - pct_complete: int (0-100)
+        - pct_complete: int (0-100, explicit if provided)
         - start_date: date (actual/current start)
         - finish_date: date (actual/current finish)
         - planned_start: date (baseline start)
         - planned_finish: date (baseline finish)
         - duration_days: int
+        - start_is_actual: bool (P6 " A" suffix detected)
+        - finish_is_actual: bool (P6 " A" suffix detected)
+        - is_complete: bool (derived from P6 actuals)
+        - is_in_progress: bool (derived from P6 actuals)
+        - progress_pct: float (0.0-1.0, derived from P6 actuals)
+        - total_float: int (for critical path)
+        - is_critical: bool (total_float == 0)
     """
     path = path or DATA_DIR / "schedule.csv"
 
     if not path.exists():
         return pd.DataFrame(columns=[
             'row_number', 'task_name', 'source_uid', 'activity_id', 'wbs', 'pct_complete',
-            'start_date', 'finish_date', 'planned_start', 'planned_finish', 'duration_days'
+            'start_date', 'finish_date', 'planned_start', 'planned_finish', 'duration_days',
+            'start_is_actual', 'finish_is_actual', 'is_complete', 'is_in_progress',
+            'progress_pct', 'total_float', 'is_critical'
         ])
 
     df = pd.read_csv(path, encoding='utf-8-sig')
@@ -631,21 +903,15 @@ def load_schedule_csv(path: Optional[Path] = None) -> pd.DataFrame:
             col_map['planned_start'] = col
         elif col_lower in ('planned finish', 'baseline finish', 'planned_finish', 'baseline_finish'):
             col_map['planned_finish'] = col
-        elif col_lower in ('duration', 'duration days', 'duration_days', 'days'):
+        elif col_lower in ('duration', 'duration days', 'duration_days', 'days', 'original duration'):
             col_map['duration_days'] = col
+        # Critical path column
+        elif col_lower in ('total float', 'float', 'total_float', 'tf'):
+            col_map['total_float'] = col
 
     # Validate required columns
     if 'task_name' not in col_map:
         raise ValueError(f"Schedule CSV missing task name column. Found: {df.columns.tolist()}")
-
-    # Helper to parse dates
-    def parse_date(val):
-        if pd.isna(val) or val == '':
-            return None
-        try:
-            return pd.to_datetime(val).date()
-        except (ValueError, TypeError):
-            return None
 
     # Build result DataFrame
     result = pd.DataFrame()
@@ -655,7 +921,6 @@ def load_schedule_csv(path: Optional[Path] = None) -> pd.DataFrame:
     # Optional columns
     if 'source_uid' in col_map:
         result['source_uid'] = df[col_map['source_uid']].fillna('').astype(str).str.strip()
-        # Replace empty strings with None for uniqueness
         result['source_uid'] = result['source_uid'].replace('', None)
     else:
         result['source_uid'] = None
@@ -670,53 +935,58 @@ def load_schedule_csv(path: Optional[Path] = None) -> pd.DataFrame:
     else:
         result['wbs'] = ''
 
+    # Parse explicit percentage if provided
     if 'pct_complete' in col_map:
-        # Parse percentage - handle both "50%" and "50" formats
         def parse_pct(val):
             if pd.isna(val):
                 return 0
             s = str(val).strip().replace('%', '')
             try:
                 pct = float(s)
-                # If value > 1, assume it's already in 0-100 scale
-                # If value <= 1, assume it's in 0-1 scale
                 if 0 <= pct <= 1:
                     return int(pct * 100)
                 return int(min(100, max(0, pct)))
             except ValueError:
                 return 0
-
         result['pct_complete'] = df[col_map['pct_complete']].apply(parse_pct)
     else:
         result['pct_complete'] = 0
 
-    # Date columns
+    # Parse dates with P6 " A" suffix detection
     if 'start_date' in col_map:
-        result['start_date'] = df[col_map['start_date']].apply(parse_date)
+        parsed_starts = df[col_map['start_date']].apply(parse_p6_date)
+        result['start_date'] = [p[0] for p in parsed_starts]
+        result['start_is_actual'] = [p[1] for p in parsed_starts]
     else:
         result['start_date'] = None
+        result['start_is_actual'] = False
 
     if 'finish_date' in col_map:
-        result['finish_date'] = df[col_map['finish_date']].apply(parse_date)
+        parsed_finishes = df[col_map['finish_date']].apply(parse_p6_date)
+        result['finish_date'] = [p[0] for p in parsed_finishes]
+        result['finish_is_actual'] = [p[1] for p in parsed_finishes]
     else:
         result['finish_date'] = None
+        result['finish_is_actual'] = False
 
     if 'planned_start' in col_map:
-        result['planned_start'] = df[col_map['planned_start']].apply(parse_date)
+        parsed = df[col_map['planned_start']].apply(parse_p6_date)
+        result['planned_start'] = [p[0] for p in parsed]
     else:
         result['planned_start'] = None
 
     if 'planned_finish' in col_map:
-        result['planned_finish'] = df[col_map['planned_finish']].apply(parse_date)
+        parsed = df[col_map['planned_finish']].apply(parse_p6_date)
+        result['planned_finish'] = [p[0] for p in parsed]
     else:
         result['planned_finish'] = None
 
+    # Parse duration
     if 'duration_days' in col_map:
         def parse_duration(val):
             if pd.isna(val):
                 return None
             try:
-                # Handle "5 days" or "5d" or just "5" formats
                 s = str(val).strip().lower().replace('days', '').replace('d', '').strip()
                 return int(float(s))
             except (ValueError, TypeError):
@@ -724,6 +994,43 @@ def load_schedule_csv(path: Optional[Path] = None) -> pd.DataFrame:
         result['duration_days'] = df[col_map['duration_days']].apply(parse_duration)
     else:
         result['duration_days'] = None
+
+    # Parse Total Float for critical path
+    if 'total_float' in col_map:
+        def parse_float(val):
+            if pd.isna(val):
+                return None
+            try:
+                s = str(val).strip().lower().replace('days', '').replace('d', '').strip()
+                return int(float(s))
+            except (ValueError, TypeError):
+                return None
+        result['total_float'] = df[col_map['total_float']].apply(parse_float)
+        result['is_critical'] = result['total_float'].apply(lambda x: x == 0 if x is not None else False)
+    else:
+        result['total_float'] = None
+        result['is_critical'] = False
+
+    # Compute P6-derived progress state
+    progress_data = []
+    for _, row in result.iterrows():
+        is_complete, is_in_progress, progress_pct = compute_p6_progress(
+            start_is_actual=row.get('start_is_actual', False),
+            finish_is_actual=row.get('finish_is_actual', False),
+            start_date=row.get('start_date'),
+            finish_date=row.get('finish_date'),
+            duration_days=row.get('duration_days')
+        )
+        progress_data.append({
+            'is_complete': is_complete,
+            'is_in_progress': is_in_progress,
+            'progress_pct': progress_pct
+        })
+
+    progress_df = pd.DataFrame(progress_data)
+    result['is_complete'] = progress_df['is_complete']
+    result['is_in_progress'] = progress_df['is_in_progress']
+    result['progress_pct'] = progress_df['progress_pct']
 
     # Filter out empty task names
     result = result[result['task_name'].str.len() > 0].copy()
