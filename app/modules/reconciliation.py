@@ -2,6 +2,7 @@
 Reconciliation Module for GMP Reconciliation App.
 Computes per-GMP-division rows with required and optional columns.
 All calculations in integer cents for precision.
+Uses Largest Remainder Method for penny-perfect E/W allocation.
 """
 import pandas as pd
 import numpy as np
@@ -9,8 +10,14 @@ from typing import Dict, Optional, List
 from datetime import datetime
 from sqlalchemy.orm import Session
 
-from .etl import cents_to_display
-from ..models import Settings
+from .etl import (
+    cents_to_display,
+    allocate_east_west,
+    allocate_largest_remainder,
+    fuzzy_match_breakdown_to_gmp,
+    calculate_weighted_progress
+)
+from ..models import Settings, GMPBudgetBreakdown
 
 
 def safe_divide(numerator: int, denominator: int) -> float:
@@ -29,15 +36,71 @@ def get_settings(db: Session) -> Dict:
             'forecast_basis': settings.forecast_basis,
             'eac_mode_when_commitments': settings.eac_mode_when_commitments,
             'gmp_scope_notes': settings.gmp_scope_notes,
-            'gmp_scope_confirmed': settings.gmp_scope_confirmed
+            'gmp_scope_confirmed': settings.gmp_scope_confirmed,
+            'use_breakdown_allocations': getattr(settings, 'use_breakdown_allocations', True),
+            'use_schedule_forecast': getattr(settings, 'use_schedule_forecast', False)
         }
     return {
         'as_of_date': None,
         'forecast_basis': 'actuals_plus_commitments',
         'eac_mode_when_commitments': 'max',
         'gmp_scope_notes': None,
-        'gmp_scope_confirmed': False
+        'gmp_scope_confirmed': False,
+        'use_breakdown_allocations': True,
+        'use_schedule_forecast': False
     }
+
+
+def get_breakdown_allocations(db: Session, gmp_division: str) -> Optional[Dict]:
+    """
+    Get East/West allocation percentages from breakdown data for a GMP division.
+
+    Returns dict with pct_east, pct_west, or None if no breakdown data.
+    """
+    breakdown = db.query(GMPBudgetBreakdown).filter(
+        GMPBudgetBreakdown.gmp_division == gmp_division
+    ).first()
+
+    if breakdown:
+        return {
+            'pct_east': breakdown.pct_east,
+            'pct_west': breakdown.pct_west,
+            'source': 'breakdown'
+        }
+    return None
+
+
+def allocate_amount_east_west(
+    amount_cents: int,
+    gmp_division: str,
+    breakdown_df: Optional[pd.DataFrame] = None,
+    default_pct_east: float = 0.5
+) -> tuple[int, int]:
+    """
+    Allocate an amount between East/West using breakdown data or default split.
+    Uses Largest Remainder Method for penny-perfect allocation.
+
+    Args:
+        amount_cents: Amount to allocate (integer cents)
+        gmp_division: GMP division name for lookup
+        breakdown_df: DataFrame with breakdown allocations (optional)
+        default_pct_east: Default East percentage if no breakdown data
+
+    Returns:
+        Tuple of (east_cents, west_cents) that sum exactly to amount_cents
+    """
+    pct_east = default_pct_east
+    pct_west = 1.0 - default_pct_east
+
+    # Look up breakdown allocation if available
+    if breakdown_df is not None and not breakdown_df.empty:
+        matched = breakdown_df[breakdown_df['gmp_division'] == gmp_division]
+        if not matched.empty:
+            pct_east = matched.iloc[0]['pct_east']
+            pct_west = matched.iloc[0]['pct_west']
+
+    # Use Largest Remainder Method for penny-perfect split
+    return allocate_east_west(amount_cents, pct_east, pct_west)
 
 
 def filter_by_as_of_date(direct_costs_df: pd.DataFrame, as_of_date: Optional[datetime]) -> pd.DataFrame:
@@ -52,11 +115,21 @@ def filter_by_as_of_date(direct_costs_df: pd.DataFrame, as_of_date: Optional[dat
 def aggregate_actuals_by_gmp(
     direct_costs_df: pd.DataFrame,
     budget_df: pd.DataFrame,
-    as_of_date: Optional[datetime] = None
+    as_of_date: Optional[datetime] = None,
+    breakdown_df: Optional[pd.DataFrame] = None,
+    use_breakdown_allocations: bool = True
 ) -> pd.DataFrame:
     """
     Aggregate actual costs by GMP division, split by West/East.
-    
+    Uses Largest Remainder Method for penny-perfect allocation.
+
+    Args:
+        direct_costs_df: Direct costs DataFrame
+        budget_df: Budget DataFrame with GMP mappings
+        as_of_date: Optional date filter
+        breakdown_df: Optional breakdown data for E/W allocation percentages
+        use_breakdown_allocations: Whether to use breakdown data for allocation
+
     Returns DataFrame with columns:
     - gmp_division
     - actual_west_cents
@@ -66,64 +139,124 @@ def aggregate_actuals_by_gmp(
     """
     # Filter by date
     filtered = filter_by_as_of_date(direct_costs_df, as_of_date)
-    
+
     # Exclude flagged duplicates
     filtered = filtered[filtered['excluded_from_actuals'] == False]
-    
+
     # Join direct costs to budget to get GMP division
-    # Direct costs have mapped_budget_code, budget has Budget Code -> gmp_division
     budget_gmp_map = budget_df[['Budget Code', 'gmp_division']].drop_duplicates()
-    
+
     merged = filtered.merge(
         budget_gmp_map,
         left_on='mapped_budget_code',
         right_on='Budget Code',
         how='left'
     )
-    
-    # Aggregate by GMP division
-    agg = merged.groupby('gmp_division').agg({
-        'amount_west': 'sum',
-        'amount_east': 'sum',
+
+    # First aggregate totals by GMP division
+    agg_totals = merged.groupby('gmp_division').agg({
         'amount_cents': 'sum',
         'direct_cost_id': 'count'
     }).reset_index()
-    
-    agg.columns = ['gmp_division', 'actual_west_cents', 'actual_east_cents', 'actual_total_cents', 'row_count']
-    
-    return agg
+    agg_totals.columns = ['gmp_division', 'actual_total_cents', 'row_count']
+
+    # Now allocate E/W using LRM for each division
+    east_cents = []
+    west_cents = []
+
+    for _, row in agg_totals.iterrows():
+        gmp_div = row['gmp_division']
+        total = int(row['actual_total_cents'])
+
+        if use_breakdown_allocations and breakdown_df is not None:
+            east, west = allocate_amount_east_west(total, gmp_div, breakdown_df)
+        else:
+            # Use existing row-level splits if available
+            div_data = merged[merged['gmp_division'] == gmp_div]
+            if 'amount_west' in div_data.columns and 'amount_east' in div_data.columns:
+                # Use pre-computed splits but ensure they tie out with LRM
+                raw_east = int(div_data['amount_east'].sum())
+                raw_west = int(div_data['amount_west'].sum())
+                raw_total = raw_east + raw_west
+                if raw_total > 0 and abs(raw_total - total) <= len(div_data):
+                    # Row splits are close, use LRM to ensure exact tie-out
+                    pct_east = raw_east / raw_total if raw_total > 0 else 0.5
+                    east, west = allocate_east_west(total, pct_east, 1.0 - pct_east)
+                else:
+                    # Default 50/50
+                    east, west = allocate_east_west(total, 0.5, 0.5)
+            else:
+                # Default 50/50
+                east, west = allocate_east_west(total, 0.5, 0.5)
+
+        east_cents.append(east)
+        west_cents.append(west)
+
+    agg_totals['actual_east_cents'] = east_cents
+    agg_totals['actual_west_cents'] = west_cents
+
+    # Reorder columns
+    return agg_totals[['gmp_division', 'actual_west_cents', 'actual_east_cents', 'actual_total_cents', 'row_count']]
 
 
 def aggregate_commitments_by_gmp(
-    budget_df: pd.DataFrame
+    budget_df: pd.DataFrame,
+    breakdown_df: Optional[pd.DataFrame] = None,
+    use_breakdown_allocations: bool = True
 ) -> pd.DataFrame:
     """
     Aggregate committed costs by GMP division, split by West/East.
-    
+    Uses Largest Remainder Method for penny-perfect allocation.
+
+    Args:
+        budget_df: Budget DataFrame with committed costs
+        breakdown_df: Optional breakdown data for E/W allocation percentages
+        use_breakdown_allocations: Whether to use breakdown data for allocation
+
     Returns DataFrame with columns:
     - gmp_division
     - committed_west_cents
     - committed_east_cents
     - committed_total_cents
     """
-    # Committed costs are on the budget rows
-    # Apply allocation to committed costs
     if 'committed_costs_cents' not in budget_df.columns:
         return pd.DataFrame(columns=['gmp_division', 'committed_west_cents', 'committed_east_cents', 'committed_total_cents'])
-    
-    budget_df = budget_df.copy()
-    budget_df['committed_west'] = (budget_df['committed_costs_cents'] * budget_df['pct_west']).round().astype(int)
-    budget_df['committed_east'] = (budget_df['committed_costs_cents'] * budget_df['pct_east']).round().astype(int)
-    
-    agg = budget_df.groupby('gmp_division').agg({
-        'committed_west': 'sum',
-        'committed_east': 'sum',
+
+    # First aggregate totals by GMP division
+    agg_totals = budget_df.groupby('gmp_division').agg({
         'committed_costs_cents': 'sum'
     }).reset_index()
-    
-    agg.columns = ['gmp_division', 'committed_west_cents', 'committed_east_cents', 'committed_total_cents']
-    
-    return agg
+    agg_totals.columns = ['gmp_division', 'committed_total_cents']
+
+    # Now allocate E/W using LRM for each division
+    east_cents = []
+    west_cents = []
+
+    for _, row in agg_totals.iterrows():
+        gmp_div = row['gmp_division']
+        total = int(row['committed_total_cents'])
+
+        if use_breakdown_allocations and breakdown_df is not None:
+            east, west = allocate_amount_east_west(total, gmp_div, breakdown_df)
+        else:
+            # Use budget row pct_west/pct_east if available
+            div_budget = budget_df[budget_df['gmp_division'] == gmp_div]
+            if 'pct_west' in div_budget.columns and 'pct_east' in div_budget.columns:
+                # Weighted average of percentages based on committed amounts
+                weighted_pct_east = 0.5
+                if total > 0:
+                    weighted_pct_east = (div_budget['committed_costs_cents'] * div_budget['pct_east']).sum() / total
+                east, west = allocate_east_west(total, weighted_pct_east, 1.0 - weighted_pct_east)
+            else:
+                east, west = allocate_east_west(total, 0.5, 0.5)
+
+        east_cents.append(east)
+        west_cents.append(west)
+
+    agg_totals['committed_east_cents'] = east_cents
+    agg_totals['committed_west_cents'] = west_cents
+
+    return agg_totals[['gmp_division', 'committed_west_cents', 'committed_east_cents', 'committed_total_cents']]
 
 
 def compute_reconciliation(
@@ -131,11 +264,14 @@ def compute_reconciliation(
     budget_df: pd.DataFrame,
     direct_costs_df: pd.DataFrame,
     predictions_df: Optional[pd.DataFrame] = None,
-    settings: Optional[Dict] = None
+    settings: Optional[Dict] = None,
+    breakdown_df: Optional[pd.DataFrame] = None,
+    schedule_df: Optional[pd.DataFrame] = None
 ) -> pd.DataFrame:
     """
     Main reconciliation computation.
-    
+    Uses Largest Remainder Method for penny-perfect E/W allocation.
+
     Computes per-GMP-division:
     Required columns:
     - amount_assigned_west (actual_west_cents displayed)
@@ -143,31 +279,52 @@ def compute_reconciliation(
     - forecast_west (EAC West)
     - forecast_east (EAC East)
     - surplus_or_overrun (GMP - EAC)
-    
+
     Optional columns:
     - actual_total
     - committed_total
     - eac_total
     - variance_to_gmp
     - pct_spent
-    
+
+    Args:
+        gmp_df: GMP DataFrame
+        budget_df: Budget DataFrame
+        direct_costs_df: Direct costs DataFrame
+        predictions_df: Optional ML predictions DataFrame
+        settings: Reconciliation settings dict
+        breakdown_df: Optional breakdown data for E/W allocation
+        schedule_df: Optional schedule data for progress-based EAC
+
     Returns DataFrame ready for display.
     """
     settings = settings or {
         'as_of_date': None,
         'forecast_basis': 'actuals_plus_commitments',
-        'eac_mode_when_commitments': 'max'
+        'eac_mode_when_commitments': 'max',
+        'use_breakdown_allocations': True,
+        'use_schedule_forecast': False
     }
-    
+
     as_of_date = settings.get('as_of_date')
     forecast_basis = settings.get('forecast_basis', 'actuals_plus_commitments')
     eac_mode = settings.get('eac_mode_when_commitments', 'max')
-    
+    use_breakdown = settings.get('use_breakdown_allocations', True)
+    use_schedule = settings.get('use_schedule_forecast', False)
+
     # Get actuals aggregated by GMP
-    actuals_agg = aggregate_actuals_by_gmp(direct_costs_df, budget_df, as_of_date)
-    
+    actuals_agg = aggregate_actuals_by_gmp(
+        direct_costs_df, budget_df, as_of_date,
+        breakdown_df=breakdown_df if use_breakdown else None,
+        use_breakdown_allocations=use_breakdown
+    )
+
     # Get commitments aggregated by GMP
-    commitments_agg = aggregate_commitments_by_gmp(budget_df)
+    commitments_agg = aggregate_commitments_by_gmp(
+        budget_df,
+        breakdown_df=breakdown_df if use_breakdown else None,
+        use_breakdown_allocations=use_breakdown
+    )
     
     # Start with GMP as base
     result = gmp_df[['GMP', 'amount_total_cents']].copy()

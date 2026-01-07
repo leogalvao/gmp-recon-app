@@ -24,9 +24,14 @@ import io
 from app.models import (
     init_db, get_db, ensure_default_settings,
     Settings, Run, BudgetToGMP, DirectToBudget, Allocation, Duplicate,
-    SideConfiguration
+    SideConfiguration, GMPBudgetBreakdown, ScheduleActivity, ScheduleToGMPMapping
 )
-from app.modules.etl import get_data_loader, cents_to_display, get_file_hashes
+from app.modules.etl import (
+    get_data_loader, cents_to_display, get_file_hashes,
+    load_breakdown_csv, load_schedule_csv,
+    fuzzy_match_breakdown_to_gmp, match_schedule_to_gmp,
+    allocate_east_west
+)
 from app.modules.mapping import (
     map_budget_to_gmp, map_direct_to_budget, apply_allocations,
     save_mapping, get_mapping_stats
@@ -2984,6 +2989,337 @@ async def refresh_all_forecasts(
         'errors': len(errors),
         'results': results,
         'error_details': errors
+    }
+
+
+# =============================================================================
+# Breakdown API Endpoints (Task 8)
+# =============================================================================
+
+@app.get("/api/breakdown/items")
+async def get_breakdown_items(db: Session = Depends(get_db)):
+    """Get all breakdown items with their GMP mappings."""
+    items = db.query(GMPBudgetBreakdown).all()
+    return {
+        'items': [
+            {
+                'id': item.id,
+                'cost_code_description': item.cost_code_description,
+                'gmp_division': item.gmp_division,
+                'gmp_sov_cents': item.gmp_sov_cents,
+                'gmp_sov_display': cents_to_display(item.gmp_sov_cents),
+                'east_funded_cents': item.east_funded_cents,
+                'east_funded_display': cents_to_display(item.east_funded_cents),
+                'west_funded_cents': item.west_funded_cents,
+                'west_funded_display': cents_to_display(item.west_funded_cents),
+                'pct_east': round(item.pct_east * 100, 1),
+                'pct_west': round(item.pct_west * 100, 1),
+                'match_score': item.match_score,
+                'source_file': item.source_file
+            }
+            for item in items
+        ],
+        'count': len(items)
+    }
+
+
+@app.post("/api/breakdown/import")
+async def import_breakdown(db: Session = Depends(get_db)):
+    """Import breakdown.csv and auto-match to GMP divisions."""
+    try:
+        loader = get_data_loader()
+        breakdown_df = loader.breakdown
+        gmp_df = loader.gmp
+
+        if breakdown_df.empty:
+            return {'error': 'No breakdown.csv file found or file is empty', 'imported': 0}
+
+        # Fuzzy match to GMP divisions
+        matched_df = fuzzy_match_breakdown_to_gmp(breakdown_df, gmp_df, score_cutoff=60)
+
+        # Clear existing breakdown data
+        db.query(GMPBudgetBreakdown).delete()
+
+        # Insert new records
+        imported = 0
+        for _, row in matched_df.iterrows():
+            record = GMPBudgetBreakdown(
+                cost_code_description=str(row['cost_code_description']),
+                gmp_division=row.get('gmp_division'),
+                gmp_sov_cents=int(row['gmp_sov_cents']),
+                east_funded_cents=int(row['east_funded_cents']),
+                west_funded_cents=int(row['west_funded_cents']),
+                pct_east=float(row['pct_east']),
+                pct_west=float(row['pct_west']),
+                match_score=int(row.get('match_score', 0)),
+                source_file='breakdown.csv'
+            )
+            db.add(record)
+            imported += 1
+
+        db.commit()
+
+        # Count matched vs unmatched
+        matched_count = len(matched_df[matched_df['gmp_division'].notna()])
+
+        return {
+            'imported': imported,
+            'matched': matched_count,
+            'unmatched': imported - matched_count
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/breakdown/{breakdown_id}/match")
+async def update_breakdown_match(
+    breakdown_id: int,
+    gmp_division: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Manually update GMP division match for a breakdown item."""
+    item = db.query(GMPBudgetBreakdown).filter(GMPBudgetBreakdown.id == breakdown_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Breakdown item not found")
+
+    item.gmp_division = gmp_division if gmp_division else None
+    item.match_score = 100  # Manual match = 100% confidence
+    db.commit()
+
+    return {'success': True, 'id': breakdown_id, 'gmp_division': gmp_division}
+
+
+# =============================================================================
+# Schedule API Endpoints (Task 8)
+# =============================================================================
+
+@app.get("/api/schedule/activities")
+async def get_schedule_activities(db: Session = Depends(get_db)):
+    """Get all schedule activities with their GMP mappings."""
+    activities = db.query(ScheduleActivity).all()
+    result = []
+    for act in activities:
+        mappings = [
+            {
+                'gmp_division': m.gmp_division,
+                'weight': m.weight
+            }
+            for m in act.mappings
+        ]
+        result.append({
+            'id': act.id,
+            'row_number': act.row_number,
+            'task_name': act.task_name,
+            'activity_id': act.activity_id,
+            'wbs': act.wbs,
+            'pct_complete': act.pct_complete,
+            'source_file': act.source_file,
+            'mappings': mappings
+        })
+
+    return {'activities': result, 'count': len(result)}
+
+
+@app.post("/api/schedule/import")
+async def import_schedule(db: Session = Depends(get_db)):
+    """Import schedule.csv and auto-match to GMP divisions."""
+    try:
+        loader = get_data_loader()
+        schedule_df = loader.schedule
+        gmp_df = loader.gmp
+
+        if schedule_df.empty:
+            return {'error': 'No schedule.csv file found or file is empty', 'imported': 0}
+
+        # Fuzzy match to GMP divisions
+        matched_df = match_schedule_to_gmp(schedule_df, gmp_df, score_cutoff=50)
+
+        # Clear existing schedule data
+        db.query(ScheduleToGMPMapping).delete()
+        db.query(ScheduleActivity).delete()
+
+        # Insert new records
+        imported = 0
+        matched_count = 0
+
+        for _, row in matched_df.iterrows():
+            activity = ScheduleActivity(
+                row_number=int(row['row_number']),
+                task_name=str(row['task_name']),
+                source_uid=row.get('source_uid'),
+                activity_id=str(row.get('activity_id', '')),
+                wbs=str(row.get('wbs', '')),
+                pct_complete=int(row.get('pct_complete', 0)),
+                source_file='schedule.csv'
+            )
+            db.add(activity)
+            db.flush()  # Get the ID
+
+            # Add GMP mapping if matched
+            gmp_div = row.get('gmp_division')
+            if gmp_div:
+                mapping = ScheduleToGMPMapping(
+                    schedule_activity_id=activity.id,
+                    gmp_division=gmp_div,
+                    weight=1.0,
+                    created_by='auto_import'
+                )
+                db.add(mapping)
+                matched_count += 1
+
+            imported += 1
+
+        db.commit()
+
+        return {
+            'imported': imported,
+            'matched': matched_count,
+            'unmatched': imported - matched_count
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/schedule/{activity_id}/map")
+async def update_schedule_mapping(
+    activity_id: int,
+    gmp_division: str = Form(...),
+    weight: float = Form(1.0),
+    db: Session = Depends(get_db)
+):
+    """Add or update GMP mapping for a schedule activity."""
+    activity = db.query(ScheduleActivity).filter(ScheduleActivity.id == activity_id).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activity not found")
+
+    # Check for existing mapping
+    existing = db.query(ScheduleToGMPMapping).filter(
+        ScheduleToGMPMapping.schedule_activity_id == activity_id,
+        ScheduleToGMPMapping.gmp_division == gmp_division
+    ).first()
+
+    if existing:
+        existing.weight = weight
+    else:
+        mapping = ScheduleToGMPMapping(
+            schedule_activity_id=activity_id,
+            gmp_division=gmp_division,
+            weight=weight,
+            created_by='manual'
+        )
+        db.add(mapping)
+
+    db.commit()
+    return {'success': True, 'activity_id': activity_id, 'gmp_division': gmp_division}
+
+
+@app.get("/api/schedule/progress/{gmp_division}")
+async def get_schedule_progress(gmp_division: str, db: Session = Depends(get_db)):
+    """Get weighted progress for a GMP division from schedule activities."""
+    mappings = db.query(ScheduleToGMPMapping).filter(
+        ScheduleToGMPMapping.gmp_division == gmp_division
+    ).all()
+
+    if not mappings:
+        return {'gmp_division': gmp_division, 'weighted_progress': 0.0, 'activities': []}
+
+    total_weight = 0.0
+    weighted_sum = 0.0
+    activities = []
+
+    for m in mappings:
+        activity = m.activity
+        weight = m.weight
+        progress = activity.pct_complete / 100.0
+
+        weighted_sum += weight * progress
+        total_weight += weight
+
+        activities.append({
+            'task_name': activity.task_name,
+            'pct_complete': activity.pct_complete,
+            'weight': weight,
+            'contribution': weight * progress
+        })
+
+    weighted_progress = weighted_sum / total_weight if total_weight > 0 else 0.0
+
+    return {
+        'gmp_division': gmp_division,
+        'weighted_progress': round(weighted_progress * 100, 1),
+        'total_weight': total_weight,
+        'activities': activities
+    }
+
+
+# =============================================================================
+# Enhanced Settings API (Task 8)
+# =============================================================================
+
+@app.post("/api/settings/breakdown")
+async def update_breakdown_settings(
+    use_breakdown_allocations: bool = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Update breakdown allocation setting."""
+    settings = db.query(Settings).first()
+    if not settings:
+        settings = Settings()
+        db.add(settings)
+
+    settings.use_breakdown_allocations = use_breakdown_allocations
+    db.commit()
+
+    return {'success': True, 'use_breakdown_allocations': use_breakdown_allocations}
+
+
+@app.post("/api/settings/schedule")
+async def update_schedule_settings(
+    use_schedule_forecast: bool = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Update schedule forecast setting."""
+    settings = db.query(Settings).first()
+    if not settings:
+        settings = Settings()
+        db.add(settings)
+
+    settings.use_schedule_forecast = use_schedule_forecast
+    db.commit()
+
+    return {'success': True, 'use_schedule_forecast': use_schedule_forecast}
+
+
+@app.get("/api/settings/integration")
+async def get_integration_settings(db: Session = Depends(get_db)):
+    """Get breakdown and schedule integration settings."""
+    settings = db.query(Settings).first()
+
+    # Get breakdown and schedule counts
+    breakdown_count = db.query(GMPBudgetBreakdown).count()
+    schedule_count = db.query(ScheduleActivity).count()
+    matched_breakdown = db.query(GMPBudgetBreakdown).filter(
+        GMPBudgetBreakdown.gmp_division.isnot(None)
+    ).count()
+    mapped_activities = db.query(ScheduleToGMPMapping).distinct(
+        ScheduleToGMPMapping.schedule_activity_id
+    ).count()
+
+    return {
+        'use_breakdown_allocations': getattr(settings, 'use_breakdown_allocations', True) if settings else True,
+        'use_schedule_forecast': getattr(settings, 'use_schedule_forecast', False) if settings else False,
+        'breakdown': {
+            'total': breakdown_count,
+            'matched': matched_breakdown,
+            'unmatched': breakdown_count - matched_breakdown
+        },
+        'schedule': {
+            'total': schedule_count,
+            'mapped': mapped_activities,
+            'unmapped': schedule_count - mapped_activities
+        }
     }
 
 

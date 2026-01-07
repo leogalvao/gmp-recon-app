@@ -141,6 +141,78 @@
             </div>
         </div>
         
+        <!-- Integration Settings (Breakdown & Schedule) -->
+        <div class="card">
+            <h2 class="text-lg font-semibold mb-4">Data Integration</h2>
+            <p class="text-sm text-gray-500 mb-4">
+                Configure East/West allocation sources and schedule-based forecasting.
+            </p>
+
+            <div class="space-y-6">
+                <!-- Breakdown Integration -->
+                <div class="p-4 bg-gray-50 rounded-lg">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <h3 class="font-medium text-gray-900">Breakdown Allocations</h3>
+                            <p class="text-sm text-gray-500 mt-1">
+                                Use owner's East/West funding breakdown (breakdown.csv) for allocation splits
+                            </p>
+                            <div id="breakdown-status" class="text-sm text-gray-500 mt-2">
+                                Loading status...
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer ml-4">
+                            <input type="checkbox"
+                                   name="use_breakdown_allocations"
+                                   id="use_breakdown_allocations"
+                                   class="sr-only peer"
+                                   {% if settings and settings.use_breakdown_allocations %}checked{% endif %}>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+                    <div class="mt-3 flex gap-2">
+                        <button type="button" onclick="importBreakdown()" class="btn btn-secondary text-sm py-1 px-3">
+                            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                            </svg>
+                            Import breakdown.csv
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Schedule Integration -->
+                <div class="p-4 bg-gray-50 rounded-lg">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <h3 class="font-medium text-gray-900">Schedule-Based Forecasting</h3>
+                            <p class="text-sm text-gray-500 mt-1">
+                                Use project schedule progress (schedule.csv) for EAC calculation
+                            </p>
+                            <div id="schedule-status" class="text-sm text-gray-500 mt-2">
+                                Loading status...
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer ml-4">
+                            <input type="checkbox"
+                                   name="use_schedule_forecast"
+                                   id="use_schedule_forecast"
+                                   class="sr-only peer"
+                                   {% if settings and settings.use_schedule_forecast %}checked{% endif %}>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+                    <div class="mt-3 flex gap-2">
+                        <button type="button" onclick="importSchedule()" class="btn btn-secondary text-sm py-1 px-3">
+                            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                            </svg>
+                            Import schedule.csv
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Last Run Info -->
         {% if last_run %}
         <div class="card">
@@ -285,5 +357,109 @@ document.querySelectorAll('input[name="forecast_basis"]').forEach(radio => {
         }
     });
 });
+
+// Load integration status on page load
+async function loadIntegrationStatus() {
+    try {
+        const response = await fetch('/api/settings/integration');
+        const data = await response.json();
+
+        // Update breakdown status
+        const breakdownStatus = document.getElementById('breakdown-status');
+        if (data.breakdown.total > 0) {
+            breakdownStatus.innerHTML = `
+                <span class="text-green-600 font-medium">${data.breakdown.matched} matched</span>
+                / ${data.breakdown.total} items
+                ${data.breakdown.unmatched > 0 ? `<span class="text-amber-600">(${data.breakdown.unmatched} unmatched)</span>` : ''}
+            `;
+        } else {
+            breakdownStatus.innerHTML = '<span class="text-gray-400">No breakdown data imported</span>';
+        }
+
+        // Update schedule status
+        const scheduleStatus = document.getElementById('schedule-status');
+        if (data.schedule.total > 0) {
+            scheduleStatus.innerHTML = `
+                <span class="text-green-600 font-medium">${data.schedule.mapped} mapped</span>
+                / ${data.schedule.total} activities
+                ${data.schedule.unmapped > 0 ? `<span class="text-amber-600">(${data.schedule.unmapped} unmapped)</span>` : ''}
+            `;
+        } else {
+            scheduleStatus.innerHTML = '<span class="text-gray-400">No schedule data imported</span>';
+        }
+
+        // Sync toggle states
+        document.getElementById('use_breakdown_allocations').checked = data.use_breakdown_allocations;
+        document.getElementById('use_schedule_forecast').checked = data.use_schedule_forecast;
+    } catch (error) {
+        console.error('Error loading integration status:', error);
+    }
+}
+
+// Import breakdown data
+async function importBreakdown() {
+    const btn = event.target.closest('button');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<svg class="animate-spin w-4 h-4 inline mr-1" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Importing...';
+
+    try {
+        const response = await fetch('/api/breakdown/import', { method: 'POST' });
+        const data = await response.json();
+
+        if (data.error) {
+            alert('Import Error: ' + data.error);
+        } else {
+            alert(`Imported ${data.imported} items. ${data.matched} matched to GMP, ${data.unmatched} unmatched.`);
+            loadIntegrationStatus();
+        }
+    } catch (error) {
+        alert('Error importing breakdown: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+}
+
+// Import schedule data
+async function importSchedule() {
+    const btn = event.target.closest('button');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<svg class="animate-spin w-4 h-4 inline mr-1" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Importing...';
+
+    try {
+        const response = await fetch('/api/schedule/import', { method: 'POST' });
+        const data = await response.json();
+
+        if (data.error) {
+            alert('Import Error: ' + data.error);
+        } else {
+            alert(`Imported ${data.imported} activities. ${data.matched} matched to GMP, ${data.unmatched} unmatched.`);
+            loadIntegrationStatus();
+        }
+    } catch (error) {
+        alert('Error importing schedule: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+}
+
+// Save integration toggle changes
+document.getElementById('use_breakdown_allocations')?.addEventListener('change', async function() {
+    const formData = new FormData();
+    formData.append('use_breakdown_allocations', this.checked);
+    await fetch('/api/settings/breakdown', { method: 'POST', body: formData });
+});
+
+document.getElementById('use_schedule_forecast')?.addEventListener('change', async function() {
+    const formData = new FormData();
+    formData.append('use_schedule_forecast', this.checked);
+    await fetch('/api/settings/schedule', { method: 'POST', body: formData });
+});
+
+// Load status on page load
+document.addEventListener('DOMContentLoaded', loadIntegrationStatus);
 </script>
 {% endblock %}

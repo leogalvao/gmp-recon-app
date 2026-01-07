@@ -4,10 +4,10 @@ All monetary values stored as integer cents to avoid float drift.
 """
 from datetime import datetime
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Float, Boolean, 
-    DateTime, Text
+    create_engine, Column, Integer, String, Float, Boolean,
+    DateTime, Text, ForeignKey, UniqueConstraint
 )
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 import enum
 
 DATABASE_URL = "sqlite:///./app.db"
@@ -80,13 +80,16 @@ class Allocation(Base):
 class Settings(Base):
     """Global application settings."""
     __tablename__ = "settings"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     as_of_date = Column(DateTime, nullable=True)  # None = auto (max transaction date)
     forecast_basis = Column(String(50), default="actuals_plus_commitments")
     eac_mode_when_commitments = Column(String(20), default="max")
     gmp_scope_notes = Column(Text, nullable=True)
     gmp_scope_confirmed = Column(Boolean, default=False)
+    # Breakdown and schedule integration settings
+    use_breakdown_allocations = Column(Boolean, default=True)  # Use breakdown.csv for E/W splits
+    use_schedule_forecast = Column(Boolean, default=False)  # Use schedule progress for EAC
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -400,6 +403,79 @@ class SideConfiguration(Base):
     allocation_weight = Column(Float, default=0.5)     # Weight for "Both" allocation split
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# =============================================================================
+# GMP Budget Breakdown (East/West Funding Splits)
+# =============================================================================
+
+class GMPBudgetBreakdown(Base):
+    """
+    Owner's East/West funding breakdown per cost code.
+    Imported from breakdown.csv and fuzzy-matched to GMP divisions.
+    Used for penny-perfect allocation of actuals and forecasts.
+    """
+    __tablename__ = 'gmp_budget_breakdown'
+
+    id = Column(Integer, primary_key=True, index=True)
+    cost_code_description = Column(String(200), nullable=False)
+    gmp_division = Column(String(200), index=True)  # Matched GMP division (null if unmatched)
+    gmp_sov_cents = Column(Integer, nullable=False)  # Total SOV in cents
+    east_funded_cents = Column(Integer, default=0)
+    west_funded_cents = Column(Integer, default=0)
+    pct_east = Column(Float, nullable=False)  # Derived: east/sov (0.0 - 1.0)
+    pct_west = Column(Float, nullable=False)  # Derived: west/sov (0.0 - 1.0)
+    match_score = Column(Integer, default=0)  # Fuzzy match confidence 0-100
+    source_file = Column(String(100))
+    imported_at = Column(DateTime, default=datetime.utcnow)
+
+
+# =============================================================================
+# Schedule Activities and Mapping (Gantt/P6 Integration)
+# =============================================================================
+
+class ScheduleActivity(Base):
+    """
+    Project schedule activities from Gantt/P6 export.
+    Tracks task progress for schedule-based EAC calculation.
+    """
+    __tablename__ = 'schedule_activities'
+
+    id = Column(Integer, primary_key=True, index=True)
+    row_number = Column(Integer)
+    task_name = Column(String(500), nullable=False)
+    source_uid = Column(String(100), unique=True, nullable=True)  # P6 GUID
+    activity_id = Column(String(50), index=True)
+    wbs = Column(String(100), index=True)
+    pct_complete = Column(Integer, default=0)  # 0-100
+    imported_at = Column(DateTime, default=datetime.utcnow)
+    source_file = Column(String(100))
+
+    # Relationship to mappings
+    mappings = relationship("ScheduleToGMPMapping", back_populates="activity", cascade="all, delete-orphan")
+
+
+class ScheduleToGMPMapping(Base):
+    """
+    Many-to-many: Schedule activities → GMP divisions with weights.
+    Allows a single activity to contribute to multiple GMP divisions.
+    Weights should sum to 1.0 for each activity.
+    """
+    __tablename__ = 'schedule_to_gmp_mapping'
+
+    id = Column(Integer, primary_key=True, index=True)
+    schedule_activity_id = Column(Integer, ForeignKey('schedule_activities.id'), nullable=False)
+    gmp_division = Column(String(200), nullable=False, index=True)
+    weight = Column(Float, default=1.0)  # 0.0-1.0, should sum to 1.0 per activity
+    created_by = Column(String(100), default='system')
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationship back to activity
+    activity = relationship("ScheduleActivity", back_populates="mappings")
+
+    __table_args__ = (
+        UniqueConstraint('schedule_activity_id', 'gmp_division', name='uq_schedule_gmp'),
+    )
 
 
 def init_db():
