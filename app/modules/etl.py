@@ -247,11 +247,14 @@ def load_budget_csv(path: Optional[Path] = None) -> pd.DataFrame:
     for col in ['Current Budget', 'Committed Costs', 'Direct Cost Tool']:
         df[f'{col.lower().replace(" ", "_")}_cents'] = df[col].apply(parse_money_to_cents)
     
+    # Filter out blank rows (no Budget Code)
+    df = df[df['Budget Code'].notna() & (df['Budget Code'] != '')].copy()
+
     # Add normalized base code
     df['base_code'] = df['Budget Code'].apply(normalize_code)
     df['division_key'] = df['Cost Code Tier 2'].apply(extract_division_key)
     df['budget_id'] = df.index
-    
+
     return df
 
 
