@@ -697,6 +697,17 @@
             </div>
         </div>
 
+        <!-- Schedule Progress -->
+        <div class="card" id="scheduleProgressCard">
+            <h3 class="font-semibold text-gray-900 mb-4">
+                Schedule Progress
+                <span class="text-xs font-normal text-gray-500 ml-2" id="scheduleActivityCount"></span>
+            </h3>
+            <div id="scheduleProgressContent">
+                <div class="text-sm text-gray-500">Loading...</div>
+            </div>
+        </div>
+
         <!-- Quick Links -->
         <div class="card">
             <h3 class="font-semibold text-gray-900 mb-4">Related</h3>
@@ -1175,5 +1186,121 @@ document.getElementById('methodModal').addEventListener('click', function(e) {
 document.getElementById('settingsModal').addEventListener('click', function(e) {
     if (e.target === this) closeSettingsModal();
 });
+
+// Load schedule progress data
+async function loadScheduleProgress() {
+    const card = document.getElementById('scheduleProgressCard');
+    const content = document.getElementById('scheduleProgressContent');
+    const countSpan = document.getElementById('scheduleActivityCount');
+
+    if (isProjectView) {
+        // Project view - load summary
+        try {
+            const response = await fetch('/api/schedule/summary');
+            const data = await response.json();
+
+            if (data.total_activities === 0) {
+                content.innerHTML = `
+                    <div class="text-sm text-gray-500">
+                        No schedule data available.
+                        <a href="/schedule" class="text-blue-600 hover:underline">Import schedule</a>
+                    </div>`;
+                return;
+            }
+
+            countSpan.textContent = `(${data.mapped_activities}/${data.total_activities} mapped)`;
+
+            content.innerHTML = `
+                <div class="space-y-3">
+                    <div class="sidebar-row text-sm">
+                        <span class="label">Avg Progress</span>
+                        <span class="value">${data.avg_progress}%</span>
+                    </div>
+                    <div class="sidebar-row text-sm">
+                        <span class="label">Start Date</span>
+                        <span class="value">${data.earliest_start || '-'}</span>
+                    </div>
+                    <div class="sidebar-row text-sm">
+                        <span class="label">End Date</span>
+                        <span class="value">${data.latest_finish || '-'}</span>
+                    </div>
+                    <div class="pt-2 border-t">
+                        <a href="/schedule" class="text-blue-600 text-sm hover:underline">
+                            Manage Schedule Mappings →
+                        </a>
+                    </div>
+                </div>`;
+        } catch (e) {
+            content.innerHTML = '<div class="text-sm text-red-500">Error loading schedule data</div>';
+        }
+    } else {
+        // Division view - load division-specific data
+        try {
+            const response = await fetch(`/api/schedule/forecast/${encodeURIComponent(gmpDivision)}`);
+            const data = await response.json();
+
+            if (!data.has_schedule_data) {
+                content.innerHTML = `
+                    <div class="text-sm text-gray-500">
+                        No schedule activities mapped.
+                        <a href="/schedule" class="text-blue-600 hover:underline">Map activities</a>
+                    </div>`;
+                return;
+            }
+
+            countSpan.textContent = `(${data.activity_count} activities)`;
+
+            // Progress bar
+            const progressColor = data.weighted_progress >= 75 ? 'bg-green-500' :
+                                  data.weighted_progress >= 50 ? 'bg-yellow-500' : 'bg-blue-500';
+
+            content.innerHTML = `
+                <div class="space-y-3">
+                    <!-- Progress Bar -->
+                    <div>
+                        <div class="flex justify-between text-xs text-gray-500 mb-1">
+                            <span>Weighted Progress</span>
+                            <span class="font-medium">${data.weighted_progress}%</span>
+                        </div>
+                        <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div class="${progressColor} h-full rounded-full transition-all"
+                                 style="width: ${data.weighted_progress}%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Schedule EAC -->
+                    <div class="sidebar-row text-sm">
+                        <span class="label">Schedule EAC</span>
+                        <span class="value font-semibold">${data.schedule_eac_display}</span>
+                    </div>
+
+                    <!-- Est. Completion -->
+                    ${data.estimated_completion ? `
+                    <div class="sidebar-row text-sm">
+                        <span class="label">Est. Completion</span>
+                        <span class="value">${data.estimated_completion}</span>
+                    </div>` : ''}
+
+                    <!-- Date Range -->
+                    ${data.earliest_start ? `
+                    <div class="sidebar-row text-sm">
+                        <span class="label">Date Range</span>
+                        <span class="value text-xs">${data.earliest_start} → ${data.latest_finish || '?'}</span>
+                    </div>` : ''}
+
+                    <div class="pt-2 border-t">
+                        <a href="/schedule" class="text-blue-600 text-sm hover:underline">
+                            Manage Mappings →
+                        </a>
+                    </div>
+                </div>`;
+        } catch (e) {
+            content.innerHTML = '<div class="text-sm text-red-500">Error loading schedule data</div>';
+        }
+    }
+}
+
+// Load schedule progress on page load
+loadScheduleProgress();
 </script>
 {% endblock %}

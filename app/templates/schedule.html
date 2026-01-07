@@ -135,6 +135,7 @@
                     <th class="px-4 py-3 font-semibold text-gray-700">#</th>
                     <th class="px-4 py-3 font-semibold text-gray-700">Activity</th>
                     <th class="px-4 py-3 font-semibold text-gray-700">WBS</th>
+                    <th class="px-4 py-3 font-semibold text-gray-700">Dates</th>
                     <th class="px-4 py-3 font-semibold text-gray-700">Progress</th>
                     <th class="px-4 py-3 font-semibold text-gray-700">GMP Mapping</th>
                     <th class="px-4 py-3 font-semibold text-gray-700 text-right">Actions</th>
@@ -151,6 +152,23 @@
                         {% endif %}
                     </td>
                     <td class="px-4 py-3 text-gray-600">{{ act.wbs or '-' }}</td>
+                    <td class="px-4 py-3">
+                        {% if act.start_date or act.finish_date %}
+                        <div class="text-xs">
+                            {% if act.start_date %}
+                            <div class="text-gray-600">Start: {{ act.start_date }}</div>
+                            {% endif %}
+                            {% if act.finish_date %}
+                            <div class="text-gray-600">End: {{ act.finish_date }}</div>
+                            {% endif %}
+                            {% if act.duration_days %}
+                            <div class="text-gray-400">{{ act.duration_days }} days</div>
+                            {% endif %}
+                        </div>
+                        {% else %}
+                        <span class="text-gray-400 text-xs">-</span>
+                        {% endif %}
+                    </td>
                     <td class="px-4 py-3">
                         <div class="flex items-center gap-2">
                             <div class="progress-bar w-20">

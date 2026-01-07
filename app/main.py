@@ -1181,6 +1181,9 @@ async def schedule_page(request: Request, db: Session = Depends(get_db)):
             'activity_id': act.activity_id,
             'wbs': act.wbs,
             'pct_complete': act.pct_complete,
+            'start_date': act.start_date.isoformat() if act.start_date else None,
+            'finish_date': act.finish_date.isoformat() if act.finish_date else None,
+            'duration_days': act.duration_days,
             'mappings': mappings
         })
         total_progress += act.pct_complete
@@ -3220,6 +3223,11 @@ async def import_schedule(db: Session = Depends(get_db)):
                 activity_id=str(row.get('activity_id', '')),
                 wbs=str(row.get('wbs', '')),
                 pct_complete=int(row.get('pct_complete', 0)),
+                start_date=row.get('start_date'),
+                finish_date=row.get('finish_date'),
+                planned_start=row.get('planned_start'),
+                planned_finish=row.get('planned_finish'),
+                duration_days=row.get('duration_days'),
                 source_file='schedule.csv'
             )
             db.add(activity)
@@ -3341,6 +3349,43 @@ async def get_schedule_progress(gmp_division: str, db: Session = Depends(get_db)
         'total_weight': total_weight,
         'activities': activities
     }
+
+
+@app.get("/api/schedule/forecast/{gmp_division}")
+async def get_schedule_forecast(gmp_division: str, db: Session = Depends(get_db)):
+    """Get schedule-based forecast for a GMP division."""
+    from app.modules.reconciliation import compute_schedule_based_forecast
+
+    # Get budget and actuals for this division
+    data_loader = get_data_loader()
+    gmp_df = data_loader.gmp
+
+    # Find budget for this division
+    gmp_row = gmp_df[gmp_df['GMP'] == gmp_division]
+    budget_cents = int(gmp_row['amount_total_cents'].iloc[0]) if len(gmp_row) > 0 else 0
+
+    # Get actuals from reconciliation (simplified - uses most recent run)
+    result = run_full_reconciliation(db)
+    actual_cents = 0
+    for row in result['recon_rows']:
+        if row['gmp_division'] == gmp_division:
+            actual_cents = row['actual_west_raw'] + row['actual_east_raw']
+            break
+
+    forecast = compute_schedule_based_forecast(db, gmp_division, budget_cents, actual_cents)
+    forecast['budget_cents'] = budget_cents
+    forecast['budget_display'] = cents_to_display(budget_cents)
+    forecast['actual_cents'] = actual_cents
+    forecast['actual_display'] = cents_to_display(actual_cents)
+
+    return forecast
+
+
+@app.get("/api/schedule/summary")
+async def get_schedule_summary(db: Session = Depends(get_db)):
+    """Get project-wide schedule summary."""
+    from app.modules.reconciliation import compute_project_schedule_summary
+    return compute_project_schedule_summary(db)
 
 
 # =============================================================================

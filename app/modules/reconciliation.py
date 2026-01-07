@@ -625,5 +625,204 @@ def validate_tie_outs(
         'actual': cents_to_display(sum_gmp_actuals),
         'difference': cents_to_display(sum_gmp_actuals - total_actual)
     })
-    
+
     return results
+
+
+# =============================================================================
+# Schedule-Based Forecast Calculations
+# =============================================================================
+
+def compute_schedule_based_forecast(
+    db: Session,
+    gmp_division: str,
+    budget_cents: int,
+    actual_cents: int
+) -> Dict:
+    """
+    Compute schedule-based EAC for a GMP division using mapped schedule activities.
+
+    Uses Earned Value Management (EVM) concepts:
+    - Schedule Progress (SP) = weighted average of activity % complete
+    - Schedule Performance Index (SPI) = SP / time elapsed (if dates available)
+    - EAC = Budget × (Actuals / Schedule Progress)
+
+    Args:
+        db: Database session
+        gmp_division: GMP division name
+        budget_cents: Budget amount in cents
+        actual_cents: Actual spent in cents
+
+    Returns dict with:
+        - weighted_progress: float (0-100)
+        - schedule_eac_cents: int
+        - estimated_completion: date or None
+        - activities: list of contributing activities
+        - has_schedule_data: bool
+    """
+    from datetime import date
+    from ..models import ScheduleToGMPMapping
+
+    # Get schedule mappings for this division
+    mappings = db.query(ScheduleToGMPMapping).filter(
+        ScheduleToGMPMapping.gmp_division == gmp_division
+    ).all()
+
+    if not mappings:
+        return {
+            'weighted_progress': 0.0,
+            'schedule_eac_cents': actual_cents,
+            'estimated_completion': None,
+            'activities': [],
+            'has_schedule_data': False,
+            'activity_count': 0
+        }
+
+    # Calculate weighted progress
+    total_weight = 0.0
+    weighted_sum = 0.0
+    activities = []
+    earliest_start = None
+    latest_finish = None
+    today = date.today()
+
+    for m in mappings:
+        activity = m.activity
+        weight = m.weight
+        progress = activity.pct_complete / 100.0
+
+        weighted_sum += weight * progress
+        total_weight += weight
+
+        # Track dates
+        if activity.start_date and (earliest_start is None or activity.start_date < earliest_start):
+            earliest_start = activity.start_date
+        if activity.finish_date and (latest_finish is None or activity.finish_date > latest_finish):
+            latest_finish = activity.finish_date
+
+        activities.append({
+            'task_name': activity.task_name,
+            'pct_complete': activity.pct_complete,
+            'weight': weight,
+            'contribution': weight * progress,
+            'start_date': activity.start_date.isoformat() if activity.start_date else None,
+            'finish_date': activity.finish_date.isoformat() if activity.finish_date else None
+        })
+
+    # Weighted progress (0-100)
+    weighted_progress = (weighted_sum / total_weight * 100) if total_weight > 0 else 0.0
+
+    # Compute schedule-based EAC
+    # If progress > 0: EAC = Actuals / Progress
+    # This assumes actuals should be proportional to progress
+    if weighted_progress > 0:
+        schedule_eac_cents = int(actual_cents / (weighted_progress / 100.0))
+    else:
+        # No progress yet - use budget as EAC
+        schedule_eac_cents = budget_cents
+
+    # Cap EAC at a reasonable multiple of budget (e.g., 2x) to avoid outliers
+    schedule_eac_cents = min(schedule_eac_cents, budget_cents * 2)
+
+    # Estimate completion date based on current progress rate
+    estimated_completion = None
+    if earliest_start and weighted_progress > 0 and weighted_progress < 100:
+        days_elapsed = (today - earliest_start).days
+        if days_elapsed > 0:
+            # Rate = progress per day
+            rate = weighted_progress / days_elapsed
+            remaining_progress = 100 - weighted_progress
+            days_remaining = int(remaining_progress / rate) if rate > 0 else 365
+            from datetime import timedelta
+            estimated_completion = today + timedelta(days=days_remaining)
+    elif weighted_progress >= 100 and latest_finish:
+        estimated_completion = latest_finish
+
+    return {
+        'weighted_progress': round(weighted_progress, 1),
+        'schedule_eac_cents': schedule_eac_cents,
+        'schedule_eac_display': cents_to_display(schedule_eac_cents),
+        'estimated_completion': estimated_completion.isoformat() if estimated_completion else None,
+        'activities': activities,
+        'has_schedule_data': True,
+        'activity_count': len(activities),
+        'earliest_start': earliest_start.isoformat() if earliest_start else None,
+        'latest_finish': latest_finish.isoformat() if latest_finish else None
+    }
+
+
+def compute_project_schedule_summary(db: Session) -> Dict:
+    """
+    Compute project-wide schedule summary.
+
+    Returns:
+        - total_activities: int
+        - mapped_activities: int
+        - unmapped_activities: int
+        - avg_progress: float
+        - earliest_start: date
+        - latest_finish: date
+        - by_division: list of division summaries
+    """
+    from ..models import ScheduleActivity, ScheduleToGMPMapping
+
+    activities = db.query(ScheduleActivity).all()
+
+    total_activities = len(activities)
+    total_progress = sum(a.pct_complete for a in activities)
+    avg_progress = total_progress / total_activities if total_activities > 0 else 0
+
+    # Find date range
+    earliest_start = None
+    latest_finish = None
+    for a in activities:
+        if a.start_date:
+            if earliest_start is None or a.start_date < earliest_start:
+                earliest_start = a.start_date
+        if a.finish_date:
+            if latest_finish is None or a.finish_date > latest_finish:
+                latest_finish = a.finish_date
+
+    # Count mapped vs unmapped
+    mapped_ids = set(
+        m.schedule_activity_id
+        for m in db.query(ScheduleToGMPMapping).all()
+    )
+    mapped_activities = sum(1 for a in activities if a.id in mapped_ids)
+    unmapped_activities = total_activities - mapped_activities
+
+    # Group by GMP division
+    division_summaries = {}
+    for m in db.query(ScheduleToGMPMapping).all():
+        div = m.gmp_division
+        if div not in division_summaries:
+            division_summaries[div] = {
+                'gmp_division': div,
+                'activity_count': 0,
+                'total_weight': 0.0,
+                'weighted_progress': 0.0
+            }
+        division_summaries[div]['activity_count'] += 1
+        division_summaries[div]['total_weight'] += m.weight
+        division_summaries[div]['weighted_progress'] += m.weight * (m.activity.pct_complete / 100.0)
+
+    # Finalize weighted progress
+    by_division = []
+    for div, summary in division_summaries.items():
+        if summary['total_weight'] > 0:
+            summary['weighted_progress'] = round(
+                summary['weighted_progress'] / summary['total_weight'] * 100, 1
+            )
+        by_division.append(summary)
+
+    by_division.sort(key=lambda x: x['gmp_division'])
+
+    return {
+        'total_activities': total_activities,
+        'mapped_activities': mapped_activities,
+        'unmapped_activities': unmapped_activities,
+        'avg_progress': round(avg_progress, 1),
+        'earliest_start': earliest_start.isoformat() if earliest_start else None,
+        'latest_finish': latest_finish.isoformat() if latest_finish else None,
+        'by_division': by_division
+    }

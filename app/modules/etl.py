@@ -579,6 +579,11 @@ def load_schedule_csv(path: Optional[Path] = None) -> pd.DataFrame:
         - WBS / WBS Code
         - % Complete / Percent Complete / Progress
         - UID / Unique ID / GUID (optional)
+        - Start / Start Date / Actual Start (optional)
+        - Finish / Finish Date / Actual Finish (optional)
+        - Planned Start / Baseline Start (optional)
+        - Planned Finish / Baseline Finish (optional)
+        - Duration / Duration Days (optional)
 
     Returns DataFrame with:
         - row_number: int (original row order)
@@ -587,12 +592,18 @@ def load_schedule_csv(path: Optional[Path] = None) -> pd.DataFrame:
         - activity_id: str
         - wbs: str
         - pct_complete: int (0-100)
+        - start_date: date (actual/current start)
+        - finish_date: date (actual/current finish)
+        - planned_start: date (baseline start)
+        - planned_finish: date (baseline finish)
+        - duration_days: int
     """
     path = path or DATA_DIR / "schedule.csv"
 
     if not path.exists():
         return pd.DataFrame(columns=[
-            'row_number', 'task_name', 'source_uid', 'activity_id', 'wbs', 'pct_complete'
+            'row_number', 'task_name', 'source_uid', 'activity_id', 'wbs', 'pct_complete',
+            'start_date', 'finish_date', 'planned_start', 'planned_finish', 'duration_days'
         ])
 
     df = pd.read_csv(path, encoding='utf-8-sig')
@@ -611,10 +622,30 @@ def load_schedule_csv(path: Optional[Path] = None) -> pd.DataFrame:
             col_map['pct_complete'] = col
         elif col_lower in ('uid', 'unique id', 'guid', 'source_uid', 'unique_id'):
             col_map['source_uid'] = col
+        # Date columns
+        elif col_lower in ('start', 'start date', 'actual start', 'start_date'):
+            col_map['start_date'] = col
+        elif col_lower in ('finish', 'finish date', 'actual finish', 'finish_date', 'end', 'end date'):
+            col_map['finish_date'] = col
+        elif col_lower in ('planned start', 'baseline start', 'planned_start', 'baseline_start'):
+            col_map['planned_start'] = col
+        elif col_lower in ('planned finish', 'baseline finish', 'planned_finish', 'baseline_finish'):
+            col_map['planned_finish'] = col
+        elif col_lower in ('duration', 'duration days', 'duration_days', 'days'):
+            col_map['duration_days'] = col
 
     # Validate required columns
     if 'task_name' not in col_map:
         raise ValueError(f"Schedule CSV missing task name column. Found: {df.columns.tolist()}")
+
+    # Helper to parse dates
+    def parse_date(val):
+        if pd.isna(val) or val == '':
+            return None
+        try:
+            return pd.to_datetime(val).date()
+        except (ValueError, TypeError):
+            return None
 
     # Build result DataFrame
     result = pd.DataFrame()
@@ -658,6 +689,41 @@ def load_schedule_csv(path: Optional[Path] = None) -> pd.DataFrame:
         result['pct_complete'] = df[col_map['pct_complete']].apply(parse_pct)
     else:
         result['pct_complete'] = 0
+
+    # Date columns
+    if 'start_date' in col_map:
+        result['start_date'] = df[col_map['start_date']].apply(parse_date)
+    else:
+        result['start_date'] = None
+
+    if 'finish_date' in col_map:
+        result['finish_date'] = df[col_map['finish_date']].apply(parse_date)
+    else:
+        result['finish_date'] = None
+
+    if 'planned_start' in col_map:
+        result['planned_start'] = df[col_map['planned_start']].apply(parse_date)
+    else:
+        result['planned_start'] = None
+
+    if 'planned_finish' in col_map:
+        result['planned_finish'] = df[col_map['planned_finish']].apply(parse_date)
+    else:
+        result['planned_finish'] = None
+
+    if 'duration_days' in col_map:
+        def parse_duration(val):
+            if pd.isna(val):
+                return None
+            try:
+                # Handle "5 days" or "5d" or just "5" formats
+                s = str(val).strip().lower().replace('days', '').replace('d', '').strip()
+                return int(float(s))
+            except (ValueError, TypeError):
+                return None
+        result['duration_days'] = df[col_map['duration_days']].apply(parse_duration)
+    else:
+        result['duration_days'] = None
 
     # Filter out empty task names
     result = result[result['task_name'].str.len() > 0].copy()

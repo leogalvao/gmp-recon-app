@@ -5,7 +5,7 @@ All monetary values stored as integer cents to avoid float drift.
 from datetime import datetime
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Boolean,
-    DateTime, Text, ForeignKey, UniqueConstraint
+    DateTime, Date, Text, ForeignKey, UniqueConstraint
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 import enum
@@ -448,6 +448,14 @@ class ScheduleActivity(Base):
     activity_id = Column(String(50), index=True)
     wbs = Column(String(100), index=True)
     pct_complete = Column(Integer, default=0)  # 0-100
+
+    # Schedule dates for time-based forecasting
+    start_date = Column(Date, nullable=True)
+    finish_date = Column(Date, nullable=True)
+    planned_start = Column(Date, nullable=True)
+    planned_finish = Column(Date, nullable=True)
+    duration_days = Column(Integer, nullable=True)
+
     imported_at = Column(DateTime, default=datetime.utcnow)
     source_file = Column(String(100))
 
