@@ -260,7 +260,8 @@ class ForecastConfig(Base):
     # Distribution method for remaining cost
     distribution_method = Column(String(20), default='linear')  # linear, front_loaded, back_loaded
 
-    # Completion date override (null = use project default)
+    # Start and completion date overrides (null = use data-driven defaults)
+    start_date = Column(DateTime, nullable=True)
     completion_date = Column(DateTime, nullable=True)
 
     # Metadata
