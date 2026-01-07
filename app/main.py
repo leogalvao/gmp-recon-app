@@ -2065,6 +2065,7 @@ async def get_budget_mapping_items(
     status: str = Query("unmapped", description="Filter: unmapped, mapped, or all"),
     side: Optional[str] = Query(None, description="Filter by side: EAST, WEST, BOTH"),
     search: Optional[str] = Query(None, description="Search query"),
+    sort: Optional[str] = Query("confidence_desc", description="Sort: confidence_desc, code_asc, description_asc"),
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     db: Session = Depends(get_db)
@@ -2172,16 +2173,24 @@ async def get_budget_mapping_items(
             or search_lower in str(b.get('Budget Code Description', '')).lower()
         ]
 
-    # Sort: unmapped with suggestions first
-    if status == 'unmapped':
-        filtered_items.sort(key=lambda x: (-float(x.get('suggestion_confidence', 0) or 0), str(x.get('Budget Code', '') or '')))
-    else:
-        filtered_items.sort(key=lambda x: str(x.get('Budget Code', '') or ''))
+    # Sort based on sort parameter
+    def get_sort_key(item, sort_option):
+        if sort_option == 'confidence_desc':
+            return (-float(item.get('suggestion_confidence', 0) or item.get('mapping_confidence', 0) or 0), str(item.get('Budget Code', '') or ''))
+        elif sort_option == 'code_asc':
+            return (str(item.get('Budget Code', '') or ''),)
+        elif sort_option == 'description_asc':
+            return (str(item.get('Budget Code Description', '') or '').lower(),)
+        else:
+            return (-float(item.get('suggestion_confidence', 0) or 0), str(item.get('Budget Code', '') or ''))
 
-    # Count totals
+    filtered_items.sort(key=lambda x: get_sort_key(x, sort))
+
+    # Count totals (from all_items, not filtered_items, for accurate stats)
     total_count = len(filtered_items)
-    total_with_suggestions = len([b for b in filtered_items if b.get('suggested_gmp') and not b['is_mapped']])
-    total_mapped = len([b for b in filtered_items if b['is_mapped']])
+    total_with_suggestions = len([b for b in all_items if b.get('suggested_gmp') and not b['is_mapped']])
+    total_mapped = len([b for b in all_items if b['is_mapped']])
+    total_unmapped = len([b for b in all_items if not b['is_mapped']])
 
     # Apply pagination
     paginated_items = filtered_items[offset:offset + limit]
@@ -2200,14 +2209,16 @@ async def get_budget_mapping_items(
             'nextOffset': offset + limit if has_more else None
         },
         'stats': {
-            'total': total_count,
+            'total': len(all_items),
             'with_suggestions': total_with_suggestions,
-            'mapped': total_mapped
+            'mapped': total_mapped,
+            'unmapped': total_unmapped
         },
         'filters': {
             'status': status,
             'side': side,
-            'search': search
+            'search': search,
+            'sort': sort
         }
     }
 
