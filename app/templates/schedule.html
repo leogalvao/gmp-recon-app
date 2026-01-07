@@ -143,7 +143,9 @@
                     <th class="px-4 py-3 font-semibold text-gray-700">#</th>
                     <th class="px-4 py-3 font-semibold text-gray-700">Activity</th>
                     <th class="px-4 py-3 font-semibold text-gray-700">Status</th>
-                    <th class="px-4 py-3 font-semibold text-gray-700">Dates</th>
+                    <th class="px-4 py-3 font-semibold text-gray-700">Start Date</th>
+                    <th class="px-4 py-3 font-semibold text-gray-700">Finish Date</th>
+                    <th class="px-4 py-3 font-semibold text-gray-700">Duration</th>
                     <th class="px-4 py-3 font-semibold text-gray-700">Progress</th>
                     <th class="px-4 py-3 font-semibold text-gray-700">GMP Mapping</th>
                     <th class="px-4 py-3 font-semibold text-gray-700 text-right">Actions</th>
@@ -187,25 +189,25 @@
                         {% endif %}
                     </td>
                     <td class="px-4 py-3">
-                        {% if act.start_date or act.finish_date %}
-                        <div class="text-xs">
-                            {% if act.start_date %}
-                            <div class="{% if act.start_is_actual %}text-green-600 font-medium{% else %}text-gray-600{% endif %}">
-                                Start: {{ act.start_date }}{% if act.start_is_actual %} ✓{% endif %}
-                            </div>
-                            {% endif %}
-                            {% if act.finish_date %}
-                            <div class="{% if act.finish_is_actual %}text-green-600 font-medium{% else %}text-gray-600{% endif %}">
-                                End: {{ act.finish_date }}{% if act.finish_is_actual %} ✓{% endif %}
-                            </div>
-                            {% endif %}
-                            {% if act.duration_days %}
-                            <div class="text-gray-400">{{ act.duration_days }} days</div>
-                            {% endif %}
+                        {% if act.start_date %}
+                        <div class="text-xs {% if act.start_is_actual %}text-green-600 font-medium{% else %}text-gray-600{% endif %}">
+                            {{ act.start_date }}{% if act.start_is_actual %} ✓{% endif %}
                         </div>
                         {% else %}
                         <span class="text-gray-400 text-xs">-</span>
                         {% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if act.finish_date %}
+                        <div class="text-xs {% if act.finish_is_actual %}text-green-600 font-medium{% else %}text-gray-600{% endif %}">
+                            {{ act.finish_date }}{% if act.finish_is_actual %} ✓{% endif %}
+                        </div>
+                        {% else %}
+                        <span class="text-gray-400 text-xs">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-xs text-gray-600">
+                        {% if act.duration_days %}{{ act.duration_days }}d{% else %}-{% endif %}
                     </td>
                     <td class="px-4 py-3">
                         <div class="flex items-center gap-2">
@@ -243,7 +245,7 @@
                 {% endfor %}
                 {% if not activities %}
                 <tr>
-                    <td colspan="6" class="px-4 py-8 text-center text-gray-500">
+                    <td colspan="9" class="px-4 py-8 text-center text-gray-500">
                         No schedule activities found. Import schedule.csv from the Settings page or use the Import button above.
                     </td>
                 </tr>
@@ -326,7 +328,7 @@ function filterTable() {
     rows.forEach(row => {
         const taskName = row.querySelector('td:nth-child(2)').textContent.toLowerCase();
         const status = row.dataset.status;
-        const mappings = row.querySelector('td:nth-child(5)').textContent;
+        const mappings = row.querySelector('td:nth-child(8)').textContent;
 
         let show = true;
 
