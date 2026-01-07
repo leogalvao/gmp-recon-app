@@ -9,7 +9,65 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Union, List, Tuple
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from dataclasses import dataclass, field
 import hashlib
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ETLResult:
+    """
+    Structured result from ETL operations with error tracking and data quality metrics.
+
+    Provides:
+    - Success/failure status
+    - Warning and error messages
+    - Row-level statistics (total, valid, skipped)
+    - Data quality metrics
+    """
+    success: bool
+    data: Optional[pd.DataFrame] = None
+    total_rows: int = 0
+    valid_rows: int = 0
+    skipped_rows: int = 0
+    warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+    quality_metrics: Dict[str, float] = field(default_factory=dict)
+
+    def add_warning(self, message: str) -> None:
+        """Add a warning message."""
+        self.warnings.append(message)
+        logger.warning(f"ETL Warning: {message}")
+
+    def add_error(self, message: str) -> None:
+        """Add an error message."""
+        self.errors.append(message)
+        logger.error(f"ETL Error: {message}")
+
+    def compute_quality_metrics(self) -> None:
+        """Calculate data quality metrics based on row statistics."""
+        if self.total_rows > 0:
+            self.quality_metrics['completeness'] = round(self.valid_rows / self.total_rows * 100, 2)
+            self.quality_metrics['skip_rate'] = round(self.skipped_rows / self.total_rows * 100, 2)
+        else:
+            self.quality_metrics['completeness'] = 0.0
+            self.quality_metrics['skip_rate'] = 0.0
+
+    @property
+    def summary(self) -> str:
+        """Return a human-readable summary of the ETL result."""
+        status = "SUCCESS" if self.success else "FAILED"
+        lines = [
+            f"ETL Result: {status}",
+            f"  Rows: {self.valid_rows}/{self.total_rows} valid ({self.skipped_rows} skipped)"
+        ]
+        if self.warnings:
+            lines.append(f"  Warnings: {len(self.warnings)}")
+        if self.errors:
+            lines.append(f"  Errors: {len(self.errors)}")
+        return "\n".join(lines)
 
 try:
     from rapidfuzz import fuzz, process
@@ -1123,6 +1181,198 @@ def calculate_weighted_progress(
     return (progress * weights).sum() / weight_sum
 
 
+# =============================================================================
+# Safe Load Functions with ETLResult
+# =============================================================================
+
+def load_budget_csv_safe(path: Optional[Path] = None) -> ETLResult:
+    """
+    Load budget CSV with comprehensive error tracking.
+
+    Returns ETLResult with:
+    - data: DataFrame on success
+    - Row statistics (total, valid, skipped)
+    - Warnings for missing optional columns
+    - Errors for critical issues
+    """
+    result = ETLResult(success=False)
+    path = path or DATA_DIR / "budget.csv"
+
+    try:
+        if not path.exists():
+            result.add_error(f"Budget file not found: {path}")
+            return result
+
+        df = pd.read_csv(path, encoding='utf-8-sig')
+        result.total_rows = len(df)
+
+        # Track missing columns
+        expected = ['Cost Code Tier 1', 'Cost Code Tier 2', 'Budget Code',
+                    'Budget Code Description', 'Current Budget', 'Committed Costs', 'Direct Cost Tool']
+
+        for col in expected:
+            if col not in df.columns:
+                df[col] = None
+                result.add_warning(f"Missing optional column '{col}', using defaults")
+
+        # Convert money columns to cents, track parsing errors
+        parse_errors = 0
+        for col in ['Current Budget', 'Committed Costs', 'Direct Cost Tool']:
+            cents_col = f'{col.lower().replace(" ", "_")}_cents'
+            df[cents_col] = df[col].apply(parse_money_to_cents)
+            # Count rows where original was non-null but parsed to 0
+            non_null_zero = ((df[col].notna()) & (df[col] != '') &
+                            (df[col] != '-') & (df[cents_col] == 0))
+            parse_errors += non_null_zero.sum()
+
+        if parse_errors > 0:
+            result.add_warning(f"{parse_errors} money values could not be parsed")
+
+        # Filter blank rows
+        initial_count = len(df)
+        df = df[df['Budget Code'].notna() & (df['Budget Code'] != '')].copy()
+        skipped_blank = initial_count - len(df)
+        if skipped_blank > 0:
+            result.add_warning(f"Skipped {skipped_blank} rows with blank Budget Code")
+
+        # Add derived columns
+        df['base_code'] = df['Budget Code'].apply(normalize_code)
+        df['division_key'] = df['Cost Code Tier 2'].apply(extract_division_key)
+        df['budget_id'] = df.index
+
+        result.data = df
+        result.valid_rows = len(df)
+        result.skipped_rows = result.total_rows - result.valid_rows
+        result.success = True
+        result.compute_quality_metrics()
+        logger.info(f"Budget load complete: {result.summary}")
+
+    except Exception as e:
+        result.add_error(f"Failed to load budget file: {str(e)}")
+        logger.exception("Budget load failed")
+
+    return result
+
+
+def load_direct_costs_csv_safe(path: Optional[Path] = None) -> ETLResult:
+    """
+    Load direct costs CSV with comprehensive error tracking.
+
+    Returns ETLResult with row-level statistics and data quality metrics.
+    """
+    result = ETLResult(success=False)
+    path = path or DATA_DIR / "direct_costs_by_group.csv"
+
+    try:
+        if not path.exists():
+            result.add_error(f"Direct costs file not found: {path}")
+            return result
+
+        df = pd.read_csv(path, encoding='utf-8-sig')
+        result.total_rows = len(df)
+
+        # Handle duplicate 'Type' column
+        if df.columns.tolist().count('Type') > 1:
+            cols = df.columns.tolist()
+            new_cols = []
+            type_count = 0
+            for c in cols:
+                if c == 'Type':
+                    type_count += 1
+                    new_cols.append(f'Type_{type_count}' if type_count > 1 else 'Type')
+                else:
+                    new_cols.append(c)
+            df.columns = new_cols
+            result.add_warning(f"Renamed {type_count - 1} duplicate 'Type' columns")
+
+        # Check expected columns
+        expected = ['Cost Code', 'Name', 'Type', 'Date', 'Vendor', 'Invoice #', 'Amount', 'Description']
+        for col in expected:
+            if col not in df.columns:
+                df[col] = None
+                result.add_warning(f"Missing column '{col}', using defaults")
+
+        # Parse amounts
+        df['amount_cents'] = df['Amount'].apply(parse_money_to_cents)
+
+        # Track zero-amount rows (could be data issues)
+        zero_amount = (df['amount_cents'] == 0).sum()
+        if zero_amount > result.total_rows * 0.1:  # More than 10%
+            result.add_warning(f"{zero_amount} rows ({zero_amount/result.total_rows*100:.1f}%) have zero amount")
+
+        # Parse dates
+        df['date_parsed'] = pd.to_datetime(df['Date'], format='mixed', errors='coerce')
+        unparsed_dates = df['date_parsed'].isna().sum()
+        if unparsed_dates > 0:
+            result.add_warning(f"{unparsed_dates} dates could not be parsed")
+
+        # Add derived columns
+        df['base_code'] = df['Cost Code'].apply(normalize_code)
+        df['normalized_invoice'] = df['Invoice #'].apply(normalize_invoice_number)
+        df['vendor_clean'] = df['Vendor'].fillna('').str.strip().str.lower()
+        df['direct_cost_id'] = df.index
+        df['excluded_from_actuals'] = False
+
+        result.data = df
+        result.valid_rows = len(df)
+        result.success = True
+        result.compute_quality_metrics()
+
+        # Add data quality metrics
+        result.quality_metrics['date_coverage'] = round(
+            (df['date_parsed'].notna().sum() / len(df)) * 100, 2) if len(df) > 0 else 0
+        result.quality_metrics['vendor_coverage'] = round(
+            (df['vendor_clean'].str.len() > 0).sum() / len(df) * 100, 2) if len(df) > 0 else 0
+
+        logger.info(f"Direct costs load complete: {result.summary}")
+
+    except Exception as e:
+        result.add_error(f"Failed to load direct costs file: {str(e)}")
+        logger.exception("Direct costs load failed")
+
+    return result
+
+
+def load_gmp_xlsx_safe(path: Optional[Path] = None) -> ETLResult:
+    """Load GMP Excel file with error tracking."""
+    result = ETLResult(success=False)
+    path = path or DATA_DIR / "GMP-Amount.xlsx"
+
+    try:
+        if not path.exists():
+            result.add_error(f"GMP file not found: {path}")
+            return result
+
+        df = pd.read_excel(path)
+        result.total_rows = len(df)
+
+        # Validate columns
+        if 'GMP' not in df.columns or 'Amount Total' not in df.columns:
+            result.add_error(f"GMP file must have 'GMP' and 'Amount Total' columns. Found: {df.columns.tolist()}")
+            return result
+
+        df = df[['GMP', 'Amount Total']].copy()
+        df['amount_total_cents'] = df['Amount Total'].apply(parse_money_to_cents)
+        df['gmp_id'] = df.index
+
+        # Check for blank GMP names
+        blank_gmp = (df['GMP'].isna() | (df['GMP'] == '')).sum()
+        if blank_gmp > 0:
+            result.add_warning(f"{blank_gmp} rows have blank GMP names")
+
+        result.data = df
+        result.valid_rows = len(df)
+        result.success = True
+        result.compute_quality_metrics()
+        logger.info(f"GMP load complete: {result.summary}")
+
+    except Exception as e:
+        result.add_error(f"Failed to load GMP file: {str(e)}")
+        logger.exception("GMP load failed")
+
+    return result
+
+
 def get_file_hashes() -> Dict[str, str]:
     """Get hashes of all input files for change detection."""
     return {
@@ -1138,51 +1388,113 @@ def get_file_hashes() -> Dict[str, str]:
 class DataLoader:
     """
     Singleton-like data loader that caches DataFrames and tracks changes.
+    Now also tracks ETL results for data quality monitoring.
     """
     _instance = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         if self._initialized:
             return
         self._initialized = True
         self._cache = {}
         self._file_hashes = {}
+        self._etl_results: Dict[str, ETLResult] = {}
         self.reload()
-    
-    def reload(self):
-        """Reload all data files."""
+
+    def reload(self, use_safe_loaders: bool = True):
+        """
+        Reload all data files.
+
+        Args:
+            use_safe_loaders: If True, use safe loaders that track errors/warnings
+        """
         self._file_hashes = get_file_hashes()
-        self._cache['gmp'] = load_gmp_xlsx()
-        self._cache['budget'] = load_budget_csv()
-        self._cache['direct_costs'] = load_direct_costs_csv()
+        self._etl_results = {}
+
+        if use_safe_loaders:
+            # Use safe loaders for core files
+            gmp_result = load_gmp_xlsx_safe()
+            self._etl_results['gmp'] = gmp_result
+            self._cache['gmp'] = gmp_result.data if gmp_result.success else pd.DataFrame()
+
+            budget_result = load_budget_csv_safe()
+            self._etl_results['budget'] = budget_result
+            self._cache['budget'] = budget_result.data if budget_result.success else pd.DataFrame()
+
+            dc_result = load_direct_costs_csv_safe()
+            self._etl_results['direct_costs'] = dc_result
+            self._cache['direct_costs'] = dc_result.data if dc_result.success else pd.DataFrame()
+        else:
+            # Use original loaders (backward compatibility)
+            self._cache['gmp'] = load_gmp_xlsx()
+            self._cache['budget'] = load_budget_csv()
+            self._cache['direct_costs'] = load_direct_costs_csv()
+
+        # These files may not exist, so use original loaders which handle that
         self._cache['allocations'] = load_allocations_csv()
         self._cache['breakdown'] = load_breakdown_csv()
         self._cache['schedule'] = load_schedule_csv()
         self._cache['max_date'] = get_max_transaction_date(self._cache['direct_costs'])
-    
+
     def check_for_changes(self) -> bool:
         """Check if any input files have changed."""
         current_hashes = get_file_hashes()
         return current_hashes != self._file_hashes
-    
+
+    def get_data_quality_report(self) -> Dict:
+        """
+        Get a comprehensive data quality report from all ETL results.
+
+        Returns dict with:
+        - overall_success: bool (all loads successful)
+        - total_warnings: int
+        - total_errors: int
+        - by_source: dict mapping source name to ETL summary
+        """
+        all_warnings = []
+        all_errors = []
+        by_source = {}
+
+        for source, result in self._etl_results.items():
+            all_warnings.extend(result.warnings)
+            all_errors.extend(result.errors)
+            by_source[source] = {
+                'success': result.success,
+                'total_rows': result.total_rows,
+                'valid_rows': result.valid_rows,
+                'skipped_rows': result.skipped_rows,
+                'warnings': result.warnings,
+                'errors': result.errors,
+                'quality_metrics': result.quality_metrics
+            }
+
+        return {
+            'overall_success': all(r.success for r in self._etl_results.values()) if self._etl_results else True,
+            'total_warnings': len(all_warnings),
+            'total_errors': len(all_errors),
+            'warnings': all_warnings,
+            'errors': all_errors,
+            'by_source': by_source
+        }
+
     @property
     def gmp(self) -> pd.DataFrame:
         return self._cache.get('gmp', pd.DataFrame())
-    
+
     @property
     def budget(self) -> pd.DataFrame:
         return self._cache.get('budget', pd.DataFrame())
-    
+
     @property
     def direct_costs(self) -> pd.DataFrame:
         return self._cache.get('direct_costs', pd.DataFrame())
-    
+
     @property
     def allocations(self) -> pd.DataFrame:
         return self._cache.get('allocations', pd.DataFrame())
@@ -1198,6 +1510,11 @@ class DataLoader:
     @property
     def max_transaction_date(self) -> datetime:
         return self._cache.get('max_date', datetime.now())
+
+    @property
+    def etl_results(self) -> Dict[str, ETLResult]:
+        """Access ETL results for each source."""
+        return self._etl_results
 
 
 # Module-level convenience function

@@ -14,6 +14,7 @@ from datetime import datetime
 
 from ..models import BudgetToGMP, DirectToBudget, Allocation, MappingAudit
 from ..config import get_config
+from .etl import allocate_east_west
 
 
 # =============================================================================
@@ -265,14 +266,59 @@ def map_direct_to_budget(direct_df: pd.DataFrame, budget_df: pd.DataFrame,
     return direct_df
 
 
+def build_allocation_cache(db: Optional[Session] = None,
+                           allocations_df: Optional[pd.DataFrame] = None) -> Dict[str, Tuple[float, float, bool]]:
+    """
+    Build an in-memory cache of all allocations for O(1) lookup.
+
+    Args:
+        db: Database session (allocations from Allocation table)
+        allocations_df: DataFrame with allocations from CSV
+
+    Returns:
+        Dict mapping code -> (pct_west, pct_east, confirmed)
+    """
+    cache = {}
+
+    # Load from DataFrame first (lower priority)
+    if allocations_df is not None and not allocations_df.empty:
+        for _, row in allocations_df.iterrows():
+            code = str(row.get('code', ''))
+            if code:
+                cache[code] = (
+                    float(row.get('pct_west', 0.5)),
+                    float(row.get('pct_east', 0.5)),
+                    bool(row.get('confirmed', True))
+                )
+
+    # Load from database (higher priority, overwrites CSV)
+    if db:
+        allocations = db.query(Allocation).all()
+        for alloc in allocations:
+            cache[alloc.code] = (alloc.pct_west, alloc.pct_east, alloc.confirmed)
+
+    return cache
+
+
 def get_allocation(code: str, allocations_df: pd.DataFrame,
-                   db: Optional[Session] = None) -> Tuple[float, float, bool]:
+                   db: Optional[Session] = None,
+                   cache: Optional[Dict[str, Tuple[float, float, bool]]] = None) -> Tuple[float, float, bool]:
     """
     Get West/East allocation percentages for a code.
     Returns (pct_west, pct_east, confirmed).
     Default allocation is loaded from config if no allocation found.
+
+    Args:
+        code: Cost code to look up
+        allocations_df: DataFrame with allocations from CSV
+        db: Database session (for individual lookups if no cache)
+        cache: Pre-built allocation cache for O(1) lookup
     """
-    # Check database first
+    # Use cache if provided (O(1) lookup)
+    if cache is not None and code in cache:
+        return cache[code]
+
+    # Fallback to database query (avoid if using cache)
     if db:
         alloc = db.query(Allocation).filter(Allocation.code == code).first()
         if alloc:
@@ -295,18 +341,27 @@ def apply_allocations(df: pd.DataFrame, amount_col: str, code_col: str,
     """
     Apply West/East allocations to a DataFrame.
     Adds columns: amount_west, amount_east, allocation_confirmed.
+
+    Uses pre-built cache to avoid N+1 query pattern.
     """
+    # Build cache once before iterating (O(n) -> O(1) per row)
+    cache = build_allocation_cache(db, allocations_df)
+    default_west, default_east = _get_default_allocation()
+
     results = []
     for idx, row in df.iterrows():
         code = row.get(code_col, '')
         amount = row.get(amount_col, 0)
-        
-        pct_west, pct_east, confirmed = get_allocation(code, allocations_df, db)
-        
-        # Calculate West first, then derive East to ensure West + East = amount exactly
-        # This prevents rounding accumulation errors
-        amount_west = int(round(amount * pct_west))
-        amount_east = int(amount) - amount_west  # Remainder goes to East
+
+        # Use cache for O(1) lookup
+        if code in cache:
+            pct_west, pct_east, confirmed = cache[code]
+        else:
+            pct_west, pct_east, confirmed = default_west, default_east, False
+
+        # Use Largest Remainder Method for penny-perfect allocation
+        # This ensures West + East = amount exactly with fair rounding
+        amount_east, amount_west = allocate_east_west(int(amount), pct_east, pct_west)
 
         results.append({
             'row_idx': idx,
@@ -316,11 +371,11 @@ def apply_allocations(df: pd.DataFrame, amount_col: str, code_col: str,
             'pct_east': pct_east,
             'allocation_confirmed': confirmed
         })
-    
+
     alloc_df = pd.DataFrame(results)
     df = df.reset_index(drop=True)
     df = pd.concat([df, alloc_df[['amount_west', 'amount_east', 'pct_west', 'pct_east', 'allocation_confirmed']]], axis=1)
-    
+
     return df
 
 

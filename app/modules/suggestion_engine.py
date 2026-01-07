@@ -113,6 +113,89 @@ class BudgetRow:
 
 
 # =============================================================================
+# Blocking Index for O(n×b) Fuzzy Matching
+# =============================================================================
+
+class BudgetBlockingIndex:
+    """
+    Blocking index for efficient budget row lookup.
+
+    Instead of comparing each direct cost to ALL budget rows O(n×m),
+    we first look up budget rows in the same "block" (by base_code).
+    This reduces complexity to O(n×b) where b = average block size.
+
+    Blocking strategy:
+    1. Primary block: base_code (e.g., "4-010" → [budget rows with same prefix])
+    2. Secondary block: cost_type_code (e.g., "L" → [labor budget rows])
+    3. Fallback: sample of all rows (for items with no code match)
+    """
+
+    def __init__(self, budget_rows: List[BudgetRow], fallback_sample_size: int = 50):
+        self.all_rows = budget_rows
+        self.fallback_sample_size = fallback_sample_size
+
+        # Primary index: base_code → List[BudgetRow]
+        self.by_base_code: Dict[str, List[BudgetRow]] = {}
+
+        # Secondary index: cost_type_code → List[BudgetRow]
+        self.by_type: Dict[str, List[BudgetRow]] = {}
+
+        # Build indices
+        for row in budget_rows:
+            # Primary index
+            if row.base_code:
+                if row.base_code not in self.by_base_code:
+                    self.by_base_code[row.base_code] = []
+                self.by_base_code[row.base_code].append(row)
+
+            # Secondary index
+            if row.cost_type_code:
+                if row.cost_type_code not in self.by_type:
+                    self.by_type[row.cost_type_code] = []
+                self.by_type[row.cost_type_code].append(row)
+
+    def get_candidates(self, dc_base_code: str, dc_type_code: str) -> List[BudgetRow]:
+        """
+        Get candidate budget rows for a direct cost using blocking.
+
+        Priority:
+        1. Same base_code (highest priority, code_match_score = 1.0)
+        2. Same cost_type_code (medium priority, likely same trade)
+        3. Fallback sample (ensure we don't miss good matches)
+
+        Returns deduplicated list of candidates.
+        """
+        candidates = set()
+        seen_codes = set()
+
+        # 1. Primary block: same base_code
+        if dc_base_code and dc_base_code in self.by_base_code:
+            for row in self.by_base_code[dc_base_code]:
+                if row.budget_code not in seen_codes:
+                    candidates.add(row)
+                    seen_codes.add(row.budget_code)
+
+        # 2. Secondary block: same cost type
+        if dc_type_code and dc_type_code in self.by_type:
+            for row in self.by_type[dc_type_code]:
+                if row.budget_code not in seen_codes:
+                    candidates.add(row)
+                    seen_codes.add(row.budget_code)
+
+        # 3. Fallback: sample of remaining rows if we have few candidates
+        if len(candidates) < self.fallback_sample_size:
+            remaining = self.fallback_sample_size - len(candidates)
+            for row in self.all_rows[:remaining * 2]:  # Oversample to find unique
+                if row.budget_code not in seen_codes:
+                    candidates.add(row)
+                    seen_codes.add(row.budget_code)
+                    if len(candidates) >= self.fallback_sample_size:
+                        break
+
+        return list(candidates)
+
+
+# =============================================================================
 # Normalization Functions
 # =============================================================================
 
@@ -288,17 +371,135 @@ def compute_historical_boost(
     return 1.0 if historical_budget == budget_code else 0.0
 
 
+# =============================================================================
+# Bayesian Scoring with Trust Decay
+# =============================================================================
+
+# Loss aversion coefficient (Kahneman & Tversky: losses hurt ~2x gains)
+LOSS_AVERSION_LAMBDA = 1.5
+
+# Trust decay parameters
+TRUST_DECAY_RATE = 0.1  # How much trust decreases per override
+MIN_TRUST = 0.3  # Floor for trust score
+
+
+def compute_bayesian_trust(
+    total_matches: int,
+    override_count: int,
+    prior_trust: float = 1.0
+) -> float:
+    """
+    Compute Bayesian trust score with loss aversion.
+
+    Model:
+    - Prior: Initial trust = 1.0 (uninformative)
+    - Likelihood: Based on observed accept/override ratio
+    - Loss aversion: Overrides penalized λ times more than accepts reward
+
+    Formula:
+        trust = prior × (accepts + 1) / (accepts + λ × overrides + 2)
+
+    Where:
+        - accepts = total_matches - override_count
+        - +1, +2 are Laplace smoothing terms
+    """
+    accepts = max(0, total_matches - override_count)
+
+    # Bayesian update with loss aversion
+    # Numerator: accepts + prior (Laplace smoothing)
+    # Denominator: total effective observations
+    effective_overrides = LOSS_AVERSION_LAMBDA * override_count
+
+    trust = (accepts + 1) / (accepts + effective_overrides + 2)
+
+    # Apply prior and floor
+    trust = max(MIN_TRUST, prior_trust * trust)
+
+    return trust
+
+
+def compute_trust_adjusted_score(
+    base_score: float,
+    budget_code: str,
+    trust_scores: Dict[str, float]
+) -> float:
+    """
+    Adjust base score using Bayesian trust score.
+
+    High trust (few overrides): score unchanged
+    Low trust (many overrides): score penalized
+
+    Formula: adjusted_score = base_score × trust_score
+    """
+    trust = trust_scores.get(budget_code, 1.0)
+    return base_score * trust
+
+
+def update_trust_on_feedback(
+    db: Session,
+    budget_code: str,
+    was_accepted: bool,
+    was_override: bool
+) -> float:
+    """
+    Update trust score after user feedback.
+
+    Args:
+        db: Database session
+        budget_code: Budget code that was suggested
+        was_accepted: True if user accepted this suggestion
+        was_override: True if user chose different from top suggestion
+
+    Returns:
+        Updated trust score
+    """
+    stats = db.query(BudgetMatchStats).filter(
+        BudgetMatchStats.budget_code == budget_code
+    ).first()
+
+    if not stats:
+        stats = BudgetMatchStats(
+            budget_code=budget_code,
+            total_matches=0,
+            override_count=0,
+            trust_score=1.0
+        )
+        db.add(stats)
+
+    # Update counts
+    if was_accepted:
+        stats.total_matches += 1
+    if was_override:
+        stats.override_count += 1
+
+    # Recompute trust score
+    stats.trust_score = compute_bayesian_trust(
+        stats.total_matches,
+        stats.override_count,
+        prior_trust=1.0
+    )
+
+    db.commit()
+    return stats.trust_score
+
+
 def compute_match_score(
     dc: DirectCostRow,
     budget: BudgetRow,
-    history: Dict[Tuple[str, str], str]
+    history: Dict[Tuple[str, str], str],
+    trust_scores: Optional[Dict[str, float]] = None
 ) -> ScoredMatch:
     """
     Compute composite match score for a direct cost → budget pair.
 
     Score formula (weights from config):
-        score = (code_prefix_match × code_match) + (cost_type_match × type_match) +
-                (text_similarity × text_sim) + (historical_pattern × historical_boost)
+        base_score = (code_prefix_match × code_match) + (cost_type_match × type_match) +
+                     (text_similarity × text_sim) + (historical_pattern × historical_boost)
+
+    With Bayesian trust adjustment:
+        final_score = base_score × trust_score
+
+    Where trust_score decreases with user overrides (loss aversion λ=1.5).
     """
     # Component scores
     code_match = compute_code_match(dc.base_code, budget.base_code)
@@ -314,13 +515,19 @@ def compute_match_score(
     # Get weights from config
     weights = _get_weights()
 
-    # Weighted sum using config weights
-    total_score = (
+    # Weighted sum using config weights (base score)
+    base_score = (
         weights.get('code_prefix_match', 0.40) * code_match +
         weights.get('cost_type_match', 0.20) * type_match +
         weights.get('text_similarity', 0.30) * text_sim +
         weights.get('historical_pattern', 0.10) * historical
     )
+
+    # Apply Bayesian trust adjustment if trust scores provided
+    if trust_scores is not None:
+        total_score = compute_trust_adjusted_score(base_score, budget.budget_code, trust_scores)
+    else:
+        total_score = base_score
 
     # Determine confidence band using config thresholds
     thresholds = _get_thresholds()
@@ -397,7 +604,8 @@ def rank_suggestions(
     budget_rows: List[BudgetRow],
     history: Dict[Tuple[str, str], str],
     match_counts: Dict[str, int],
-    top_k: int = 3
+    top_k: int = 3,
+    trust_scores: Optional[Dict[str, float]] = None
 ) -> List[ScoredMatch]:
     """
     Rank all budget rows for a direct cost and return top-k suggestions.
@@ -405,15 +613,59 @@ def rank_suggestions(
     Tie-breaking rules (when scores are equal):
     1. Prefer budget code with more historical matches
     2. Alphabetical by budget code (deterministic fallback)
+
+    If trust_scores provided, applies Bayesian trust adjustment (penalizes
+    frequently-overridden suggestions).
     """
     candidates = []
     thresholds = _get_thresholds()
     min_threshold = thresholds.get('low', 0.40)
 
     for budget in budget_rows:
-        scored = compute_match_score(dc, budget, history)
+        scored = compute_match_score(dc, budget, history, trust_scores)
 
         # Only consider candidates above minimum threshold from config
+        if scored.total_score >= min_threshold:
+            scored.historical_match_count = match_counts.get(budget.budget_code, 0)
+            candidates.append(scored)
+
+    # Sort by: score DESC, historical_count DESC, budget_code ASC
+    candidates.sort(key=lambda x: (
+        -x.total_score,
+        -x.historical_match_count,
+        x.budget_code
+    ))
+
+    return candidates[:top_k]
+
+
+def rank_suggestions_blocked(
+    dc: DirectCostRow,
+    blocking_index: BudgetBlockingIndex,
+    history: Dict[Tuple[str, str], str],
+    match_counts: Dict[str, int],
+    top_k: int = 3,
+    trust_scores: Optional[Dict[str, float]] = None
+) -> List[ScoredMatch]:
+    """
+    Rank budget rows for a direct cost using blocking for efficiency.
+
+    Uses BudgetBlockingIndex to reduce candidate set from O(m) to O(b),
+    where b is the average block size (much smaller than total budget rows).
+
+    If trust_scores provided, applies Bayesian trust adjustment.
+    """
+    # Get candidate budget rows from blocking index
+    dc_type_code = extract_cost_type_code(dc.cost_type)
+    candidates_budget = blocking_index.get_candidates(dc.base_code, dc_type_code)
+
+    candidates = []
+    thresholds = _get_thresholds()
+    min_threshold = thresholds.get('low', 0.40)
+
+    for budget in candidates_budget:
+        scored = compute_match_score(dc, budget, history, trust_scores)
+
         if scored.total_score >= min_threshold:
             scored.historical_match_count = match_counts.get(budget.budget_code, 0)
             candidates.append(scored)
@@ -482,7 +734,9 @@ def compute_all_suggestions(
     budget_df: pd.DataFrame,
     db: Session,
     unmapped_only: bool = True,
-    top_k: int = 3
+    top_k: int = 3,
+    use_blocking: bool = True,
+    use_bayesian_trust: bool = True
 ) -> Dict[int, List[Dict]]:
     """
     Compute suggestions for all direct cost rows.
@@ -493,6 +747,8 @@ def compute_all_suggestions(
         db: Database session for loading history
         unmapped_only: If True, only process unmapped rows
         top_k: Number of suggestions per row
+        use_blocking: If True, use blocking index for O(n×b) performance
+        use_bayesian_trust: If True, apply trust score adjustment (penalizes overridden suggestions)
 
     Returns:
         Dict mapping direct_cost_id → list of suggestion dicts
@@ -501,8 +757,14 @@ def compute_all_suggestions(
     history = load_historical_patterns(db)
     match_counts = load_budget_match_counts(db)
 
+    # Load trust scores for Bayesian adjustment
+    trust_scores = load_budget_trust_scores(db) if use_bayesian_trust else None
+
     # Convert DataFrames
     budget_rows = df_to_budget_rows(budget_df)
+
+    # Build blocking index for O(n×b) performance
+    blocking_index = BudgetBlockingIndex(budget_rows) if use_blocking else None
 
     # Filter to unmapped if requested
     if unmapped_only and 'mapped_budget_code' in direct_costs_df.columns:
@@ -516,7 +778,14 @@ def compute_all_suggestions(
     results = {}
 
     for dc in dc_rows:
-        suggestions = rank_suggestions(dc, budget_rows, history, match_counts, top_k)
+        if use_blocking and blocking_index:
+            suggestions = rank_suggestions_blocked(
+                dc, blocking_index, history, match_counts, top_k, trust_scores
+            )
+        else:
+            suggestions = rank_suggestions(
+                dc, budget_rows, history, match_counts, top_k, trust_scores
+            )
         results[dc.id] = [s.to_dict() for s in suggestions]
 
     return results
