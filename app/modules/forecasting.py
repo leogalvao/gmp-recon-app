@@ -508,6 +508,25 @@ def generate_monthly_periods(
     return periods
 
 
+def _generate_s_curve_weights(n: int) -> List[float]:
+    """
+    Generate S-curve weights using a bell-curve approximation.
+    Creates realistic construction spend pattern: slow start, peak middle, slow end.
+    """
+    import math
+    weights = []
+    for i in range(n):
+        # Use a bell curve centered at the middle
+        # Peak at ~40% through the project (typical construction pattern)
+        x = (i + 0.5) / n  # Position 0-1
+        # Modified bell curve: peak slightly before center
+        peak_position = 0.4
+        spread = 0.25
+        weight = math.exp(-((x - peak_position) ** 2) / (2 * spread ** 2))
+        weights.append(max(weight, 0.1))  # Minimum weight to avoid zeros
+    return weights
+
+
 def distribute_etc_to_periods(
     etc_cents: int,
     periods: List[Dict[str, Any]],
@@ -520,7 +539,7 @@ def distribute_etc_to_periods(
     Args:
         etc_cents: Total remaining cost to distribute
         periods: List of period dictionaries (will be modified in place)
-        distribution_method: 'linear', 'front_loaded', or 'back_loaded'
+        distribution_method: 'linear', 'front_loaded', 'back_loaded', or 's_curve'
         west_ratio: Proportion allocated to West region (0.0-1.0)
 
     Returns:
@@ -578,6 +597,23 @@ def distribute_etc_to_periods(
             period['forecast_east_cents'] = amount - period['forecast_west_cents']
             allocated += amount
 
+    elif distribution_method == 's_curve':
+        # S-curve distribution: realistic construction spend pattern
+        # Bell curve with peak around 40% of project duration
+        weights = _generate_s_curve_weights(n)
+        total_weight = sum(weights)
+
+        allocated = 0
+        for i, period in enumerate(future_periods):
+            if i == n - 1:
+                amount = etc_cents - allocated
+            else:
+                amount = int(etc_cents * weights[i] / total_weight)
+            period['forecast_cents'] = amount
+            period['forecast_west_cents'] = int(amount * west_ratio)
+            period['forecast_east_cents'] = amount - period['forecast_west_cents']
+            allocated += amount
+
     return periods
 
 
@@ -585,7 +621,7 @@ def aggregate_actuals_by_period(
     transactions_df: pd.DataFrame,
     periods: List[Dict[str, Any]],
     gmp_division: str,
-    date_column: str = 'Date',
+    date_column: str = 'date_parsed',
     amount_column: str = 'amount_cents',
     west_column: str = 'amount_west_cents',
     east_column: str = 'amount_east_cents'
@@ -597,7 +633,7 @@ def aggregate_actuals_by_period(
         transactions_df: DataFrame with transaction data
         periods: List of period dictionaries
         gmp_division: GMP division to filter for
-        date_column: Name of date column
+        date_column: Name of date column (defaults to 'date_parsed', falls back to 'Date')
         amount_column: Name of amount column (in cents)
         west_column: Name of west amount column
         east_column: Name of east amount column
@@ -617,9 +653,17 @@ def aggregate_actuals_by_period(
     if df.empty:
         return periods
 
+    # Determine date column - prefer date_parsed (already datetime), fall back to Date
+    actual_date_col = date_column
+    if date_column not in df.columns:
+        if 'Date' in df.columns:
+            actual_date_col = 'Date'
+        else:
+            return periods  # No usable date column
+
     # Ensure date column is datetime
-    if date_column in df.columns:
-        df[date_column] = pd.to_datetime(df[date_column])
+    if actual_date_col in df.columns:
+        df[actual_date_col] = pd.to_datetime(df[actual_date_col], errors='coerce')
 
     for period in periods:
         if period['period_type'] not in ['past', 'current']:
@@ -629,7 +673,7 @@ def aggregate_actuals_by_period(
         end = period['period_end']
 
         # Filter transactions in this period
-        mask = (df[date_column] >= start) & (df[date_column] <= end)
+        mask = (df[actual_date_col] >= start) & (df[actual_date_col] <= end)
         period_df = df[mask]
 
         if not period_df.empty:
