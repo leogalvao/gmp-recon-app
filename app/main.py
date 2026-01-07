@@ -3255,6 +3255,18 @@ async def import_schedule(db: Session = Depends(get_db)):
         matched_count = 0
 
         for _, row in matched_df.iterrows():
+            # Get P6 fields (computed by load_schedule_csv)
+            import math
+            start_is_actual = bool(row.get('start_is_actual', False))
+            finish_is_actual = bool(row.get('finish_is_actual', False))
+            is_complete = bool(row.get('is_complete', False))
+            is_in_progress = bool(row.get('is_in_progress', False))
+            progress_pct_val = row.get('progress_pct', 0.0)
+            progress_pct = float(progress_pct_val) if progress_pct_val is not None and not (isinstance(progress_pct_val, float) and math.isnan(progress_pct_val)) else 0.0
+            total_float_val = row.get('total_float')
+            total_float = int(total_float_val) if total_float_val is not None and not (isinstance(total_float_val, float) and math.isnan(total_float_val)) else None
+            is_critical = bool(row.get('is_critical', False))
+
             activity = ScheduleActivity(
                 row_number=int(row['row_number']),
                 task_name=str(row['task_name']),
@@ -3267,6 +3279,14 @@ async def import_schedule(db: Session = Depends(get_db)):
                 planned_start=row.get('planned_start'),
                 planned_finish=row.get('planned_finish'),
                 duration_days=row.get('duration_days'),
+                # P6 fields
+                start_is_actual=start_is_actual,
+                finish_is_actual=finish_is_actual,
+                is_complete=is_complete,
+                is_in_progress=is_in_progress,
+                progress_pct=progress_pct,
+                total_float=int(total_float) if total_float is not None else None,
+                is_critical=is_critical,
                 source_file='schedule.csv'
             )
             db.add(activity)
