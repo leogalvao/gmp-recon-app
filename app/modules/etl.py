@@ -369,13 +369,13 @@ def load_breakdown_csv(path: Optional[Path] = None) -> pd.DataFrame:
     col_map = {}
     for col in df.columns:
         col_lower = col.lower().strip()
-        if col_lower in ('cost_code_description', 'description', 'item', 'name', 'cost code description'):
+        if col_lower in ('cost_code_description', 'description', 'item', 'name', 'cost code description', 'cost code - description'):
             col_map['cost_code_description'] = col
         elif col_lower in ('gmp_sov', 'gmp sov', 'total', 'amount', 'sov'):
             col_map['gmp_sov'] = col
-        elif col_lower in ('east_funded', 'east funded', 'east'):
+        elif col_lower in ('east_funded', 'east funded', 'east', 'east addition funded on gmp'):
             col_map['east_funded'] = col
-        elif col_lower in ('west_funded', 'west funded', 'west'):
+        elif col_lower in ('west_funded', 'west funded', 'west', 'west addition funded on gmp'):
             col_map['west_funded'] = col
 
     # Validate required columns

@@ -329,7 +329,22 @@ def compute_reconciliation(
     # Start with GMP as base
     result = gmp_df[['GMP', 'amount_total_cents']].copy()
     result.columns = ['gmp_division', 'gmp_amount_cents']
-    
+
+    # Merge breakdown allocations (Budget East/West from breakdown.csv)
+    if breakdown_df is not None and not breakdown_df.empty:
+        result = result.merge(
+            breakdown_df[['gmp_division', 'east_funded_cents', 'west_funded_cents']],
+            on='gmp_division',
+            how='left'
+        )
+        result['budget_east_cents'] = result['east_funded_cents'].fillna(0).astype(int)
+        result['budget_west_cents'] = result['west_funded_cents'].fillna(0).astype(int)
+        result = result.drop(columns=['east_funded_cents', 'west_funded_cents'], errors='ignore')
+    else:
+        # No breakdown data - default to 50/50 split of GMP amount
+        result['budget_east_cents'] = 0
+        result['budget_west_cents'] = 0
+
     # Merge actuals
     result = result.merge(actuals_agg, on='gmp_division', how='left')
     for col in ['actual_west_cents', 'actual_east_cents', 'actual_total_cents', 'row_count']:
@@ -393,9 +408,19 @@ def format_for_display(recon_df: pd.DataFrame) -> List[Dict]:
     """
     rows = []
     for _, row in recon_df.iterrows():
+        # Budget allocations from breakdown.csv (owner's funding plan)
+        budget_west = int(row.get('budget_west_cents', 0))
+        budget_east = int(row.get('budget_east_cents', 0))
+
         rows.append({
             'gmp_division': row['gmp_division'],
             'gmp_amount': cents_to_display(int(row['gmp_amount_cents'])),
+            # Budget allocations (from breakdown.csv)
+            'budget_west': cents_to_display(budget_west),
+            'budget_east': cents_to_display(budget_east),
+            'budget_west_raw': budget_west,
+            'budget_east_raw': budget_east,
+            # Actuals (what has been spent)
             'amount_assigned_west': cents_to_display(int(row['actual_west_cents'])),
             'amount_assigned_east': cents_to_display(int(row['actual_east_cents'])),
             'forecast_west': cents_to_display(int(row['forecast_west_cents'])),

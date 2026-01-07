@@ -248,15 +248,38 @@ def run_full_reconciliation(db: Session, side_filter: Optional[str] = None) -> D
     # Apply allocations to direct costs - use base_code
     direct_costs_df = apply_allocations(direct_costs_df, 'amount_cents', 'base_code', allocations_df, db)
     
+    # Load breakdown data for East/West allocations
+    breakdown_records = db.query(GMPBudgetBreakdown).all()
+    breakdown_df = None
+    if breakdown_records:
+        breakdown_df = pd.DataFrame([{
+            'gmp_division': b.gmp_division,
+            'east_funded_cents': b.east_funded_cents,
+            'west_funded_cents': b.west_funded_cents,
+            'pct_east': b.pct_east,
+            'pct_west': b.pct_west
+        } for b in breakdown_records if b.gmp_division])
+        # Aggregate by GMP division (sum allocations)
+        if not breakdown_df.empty:
+            breakdown_df = breakdown_df.groupby('gmp_division').agg({
+                'east_funded_cents': 'sum',
+                'west_funded_cents': 'sum',
+                'pct_east': 'mean',
+                'pct_west': 'mean'
+            }).reset_index()
+
     # Run ML predictions
     pipeline = get_forecasting_pipeline()
     if pipeline.last_trained is None:
         pipeline.train(direct_costs_df, budget_df, gmp_df, settings.get('as_of_date'))
-    
+
     predictions_df = pipeline.predict(direct_costs_df, budget_df, gmp_df, settings.get('as_of_date'))
-    
-    # Compute reconciliation
-    recon_df = compute_reconciliation(gmp_df, budget_df, direct_costs_df, predictions_df, settings)
+
+    # Compute reconciliation with breakdown data
+    recon_df = compute_reconciliation(
+        gmp_df, budget_df, direct_costs_df, predictions_df, settings,
+        breakdown_df=breakdown_df
+    )
     
     # Format for display
     recon_rows = format_for_display(recon_df)
@@ -1134,6 +1157,52 @@ async def data_health_page(request: Request, db: Session = Depends(get_db)):
         "issues": issues,
         "stats": stats,
         "active_page": "data-health"
+    })
+
+
+@app.get("/schedule", response_class=HTMLResponse)
+async def schedule_page(request: Request, db: Session = Depends(get_db)):
+    """Schedule to GMP mapping page."""
+    # Get all schedule activities with their mappings
+    activities = db.query(ScheduleActivity).order_by(ScheduleActivity.row_number).all()
+    activities_data = []
+    total_progress = 0
+    mapped_count = 0
+
+    for act in activities:
+        mappings = [
+            {'gmp_division': m.gmp_division, 'weight': m.weight}
+            for m in act.mappings
+        ]
+        activities_data.append({
+            'id': act.id,
+            'row_number': act.row_number,
+            'task_name': act.task_name,
+            'activity_id': act.activity_id,
+            'wbs': act.wbs,
+            'pct_complete': act.pct_complete,
+            'mappings': mappings
+        })
+        total_progress += act.pct_complete
+        if mappings:
+            mapped_count += 1
+
+    # Get GMP divisions for dropdown
+    data_loader = get_data_loader()
+    gmp_divisions = data_loader.gmp['GMP'].tolist() if not data_loader.gmp.empty else []
+
+    total_activities = len(activities_data)
+    avg_progress = round(total_progress / total_activities) if total_activities > 0 else 0
+
+    return templates.TemplateResponse("schedule.html", {
+        "request": request,
+        "activities": activities_data,
+        "gmp_divisions": gmp_divisions,
+        "total_activities": total_activities,
+        "mapped_activities": mapped_count,
+        "unmapped_activities": total_activities - mapped_count,
+        "avg_progress": avg_progress,
+        "active_page": "schedule"
     })
 
 
@@ -3211,6 +3280,26 @@ async def update_schedule_mapping(
         )
         db.add(mapping)
 
+    db.commit()
+    return {'success': True, 'activity_id': activity_id, 'gmp_division': gmp_division}
+
+
+@app.delete("/api/schedule/{activity_id}/unmap")
+async def delete_schedule_mapping(
+    activity_id: int,
+    gmp_division: str,
+    db: Session = Depends(get_db)
+):
+    """Remove GMP mapping from a schedule activity."""
+    mapping = db.query(ScheduleToGMPMapping).filter(
+        ScheduleToGMPMapping.schedule_activity_id == activity_id,
+        ScheduleToGMPMapping.gmp_division == gmp_division
+    ).first()
+
+    if not mapping:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+
+    db.delete(mapping)
     db.commit()
     return {'success': True, 'activity_id': activity_id, 'gmp_division': gmp_division}
 

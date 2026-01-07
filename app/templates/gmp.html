@@ -396,11 +396,11 @@
                         <tr>
                             <th class="text-left">GMP Division</th>
                             <th class="text-right">GMP Amount</th>
-                            <th class="text-right">Assigned West</th>
-                            <th class="text-right">Assigned East</th>
+                            <th class="text-right">Budget West</th>
+                            <th class="text-right">Budget East</th>
                             <th class="text-center" style="width: 60px">Valid</th>
-                            <th class="text-right">Forecast West</th>
-                            <th class="text-right">Forecast East</th>
+                            <th class="text-right">Actual West</th>
+                            <th class="text-right">Actual East</th>
                             <th class="text-right">Surplus/Overrun</th>
                             <th class="text-right col-actual_total">Actual Total</th>
                             <th class="text-right col-committed_total hidden">Committed</th>
@@ -413,51 +413,61 @@
                         <tr class="border-b border-gray-100" data-gmp="{{ row.gmp_division }}" data-actual-total="{{ row.actual_west_raw + row.actual_east_raw }}">
                             <td class="font-medium text-gray-900">{{ row.gmp_division }}</td>
                             <td class="text-right text-gray-700">{{ row.gmp_amount }}</td>
+                            <!-- Budget West (from breakdown.csv) -->
                             <td class="text-right">
-                                <span class="editable-cell"
-                                      data-gmp="{{ row.gmp_division }}"
-                                      data-field="west"
-                                      data-value="{{ row.actual_west_raw }}"
-                                      data-display="{{ row.amount_assigned_west }}"
-                                      ondblclick="openEditModal(this)">
-                                    <span class="drilldown-trigger"
-                                          data-gmp="{{ row.gmp_division }}"
-                                          data-region="west"
-                                          onclick="event.stopPropagation(); showDrilldown(this)">
-                                        {{ row.amount_assigned_west }}
-                                    </span>
-                                    <svg class="edit-icon w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
-                                    </svg>
+                                <span class="{% if row.budget_west_raw > 0 %}text-green-700 font-medium{% else %}text-gray-400{% endif %}"
+                                      title="Owner's West funding from breakdown">
+                                    {{ row.budget_west }}
                                 </span>
                             </td>
+                            <!-- Budget East (from breakdown.csv) -->
                             <td class="text-right">
-                                <span class="editable-cell"
-                                      data-gmp="{{ row.gmp_division }}"
-                                      data-field="east"
-                                      data-value="{{ row.actual_east_raw }}"
-                                      data-display="{{ row.amount_assigned_east }}"
-                                      ondblclick="openEditModal(this)">
-                                    <span class="drilldown-trigger"
-                                          data-gmp="{{ row.gmp_division }}"
-                                          data-region="east"
-                                          onclick="event.stopPropagation(); showDrilldown(this)">
-                                        {{ row.amount_assigned_east }}
-                                    </span>
-                                    <svg class="edit-icon w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
-                                    </svg>
+                                <span class="{% if row.budget_east_raw > 0 %}text-blue-700 font-medium{% else %}text-gray-400{% endif %}"
+                                      title="Owner's East funding from breakdown">
+                                    {{ row.budget_east }}
                                 </span>
                             </td>
+                            <!-- Valid: Budget West + East = GMP Amount -->
                             <td class="text-center validation-cell">
-                                <span class="validation-badge ok" title="West + East = Total">
+                                {% set budget_total = row.budget_west_raw + row.budget_east_raw %}
+                                {% if budget_total == row.gmp_amount_raw %}
+                                <span class="validation-badge ok" title="Budget West + East = GMP Amount">
                                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                                     </svg>
                                 </span>
+                                {% elif budget_total == 0 %}
+                                <span class="validation-badge" style="background: #fef3c7; color: #92400e;" title="No breakdown data">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                                    </svg>
+                                </span>
+                                {% else %}
+                                <span class="validation-badge error" title="Variance: {{ ((budget_total - row.gmp_amount_raw) / 100)|round(2) }}">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </span>
+                                {% endif %}
                             </td>
-                            <td class="text-right text-gray-600">{{ row.forecast_west }}</td>
-                            <td class="text-right text-gray-600">{{ row.forecast_east }}</td>
+                            <!-- Actual West (costs spent) -->
+                            <td class="text-right">
+                                <span class="drilldown-trigger"
+                                      data-gmp="{{ row.gmp_division }}"
+                                      data-region="west"
+                                      onclick="event.stopPropagation(); showDrilldown(this)">
+                                    {{ row.amount_assigned_west }}
+                                </span>
+                            </td>
+                            <!-- Actual East (costs spent) -->
+                            <td class="text-right">
+                                <span class="drilldown-trigger"
+                                      data-gmp="{{ row.gmp_division }}"
+                                      data-region="east"
+                                      onclick="event.stopPropagation(); showDrilldown(this)">
+                                    {{ row.amount_assigned_east }}
+                                </span>
+                            </td>
                             <td class="text-right font-semibold {% if row.surplus_positive %}surplus{% else %}overrun{% endif %}">
                                 {{ row.surplus_or_overrun }}
                             </td>
@@ -472,11 +482,11 @@
                         <tr>
                             <td class="text-gray-900">TOTAL</td>
                             <td class="text-right">{{ summary.total_gmp }}</td>
-                            <td class="text-right" id="total-west">-</td>
-                            <td class="text-right" id="total-east">-</td>
+                            <td class="text-right text-green-700" id="total-budget-west">-</td>
+                            <td class="text-right text-blue-700" id="total-budget-east">-</td>
                             <td class="text-center">-</td>
-                            <td class="text-right">-</td>
-                            <td class="text-right">-</td>
+                            <td class="text-right" id="total-actual-west">-</td>
+                            <td class="text-right" id="total-actual-east">-</td>
                             <td class="text-right {% if summary.surplus_positive %}surplus{% else %}overrun{% endif %}">
                                 {{ summary.total_surplus_or_overrun }}
                             </td>
@@ -696,6 +706,9 @@ function applySideFilter(side) {
 }
 
 $(document).ready(function() {
+    // Calculate footer totals from row data
+    calculateFooterTotals();
+
     // Initialize DataTable
     const table = $('#gmp-table').DataTable({
         paging: false,
@@ -736,6 +749,36 @@ $(document).ready(function() {
     // Real-time validation in edit modal
     $('#edit-west, #edit-east').on('input', updateValidation);
 });
+
+// Calculate and display footer totals
+function calculateFooterTotals() {
+    // Pre-computed totals from template data
+    const rowData = [
+        {% for row in rows %}
+        {
+            budget_west: {{ row.budget_west_raw }},
+            budget_east: {{ row.budget_east_raw }},
+            actual_west: {{ row.actual_west_raw }},
+            actual_east: {{ row.actual_east_raw }}
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ];
+
+    let totalBudgetWest = 0, totalBudgetEast = 0;
+    let totalActualWest = 0, totalActualEast = 0;
+
+    rowData.forEach(r => {
+        totalBudgetWest += r.budget_west;
+        totalBudgetEast += r.budget_east;
+        totalActualWest += r.actual_west;
+        totalActualEast += r.actual_east;
+    });
+
+    $('#total-budget-west').text(formatCurrency(totalBudgetWest));
+    $('#total-budget-east').text(formatCurrency(totalBudgetEast));
+    $('#total-actual-west').text(formatCurrency(totalActualWest));
+    $('#total-actual-east').text(formatCurrency(totalActualEast));
+}
 
 function formatCurrency(cents) {
     return '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
