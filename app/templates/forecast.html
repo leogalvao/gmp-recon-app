@@ -454,7 +454,9 @@
                     <div class="metric-sub">Cost Performance Index</div>
                 </div>
                 {% if forecast.schedule_expected and forecast.schedule_expected > 0 %}
-                <div class="metric-card">
+                <div class="metric-card cursor-pointer hover:border-blue-300 transition-colors"
+                     onclick="showScheduleVarianceDrilldown('{{ gmp_division }}', this)"
+                     title="Click for schedule variance details">
                     <div class="metric-label">Schedule Var</div>
                     <div class="metric-value {% if forecast.schedule_variance_status == 'over' %}overrun{% elif forecast.schedule_variance_status == 'under' %}surplus{% else %}neutral{% endif %}">
                         {% if forecast.schedule_variance >= 0 %}+{% endif %}{{ '{:.1f}'.format(forecast.schedule_variance_pct) }}%
@@ -503,10 +505,14 @@
                             <td class="py-3 px-4 text-right {% if div.var_cents > 0 %}text-green-600{% elif div.var_cents < 0 %}text-red-600{% else %}text-gray-500{% endif %}">
                                 {{ div.var_display }}
                             </td>
-                            <td class="py-3 px-4 text-right {% if div.schedule_variance_status == 'over' %}text-red-600{% elif div.schedule_variance_status == 'under' %}text-green-600{% else %}text-gray-500{% endif %}">
+                            <td class="py-3 px-4 text-right">
                                 {% if div.schedule_expected and div.schedule_expected > 0 %}
-                                {% if div.schedule_variance >= 0 %}+{% endif %}{{ '{:.1f}'.format(div.schedule_variance_pct) }}%
-                                {% else %}-{% endif %}
+                                <span class="cursor-pointer hover:underline {% if div.schedule_variance_status == 'over' %}text-red-600{% elif div.schedule_variance_status == 'under' %}text-green-600{% else %}text-gray-500{% endif %}"
+                                      onclick="event.stopPropagation(); showScheduleVarianceDrilldown('{{ div.gmp_division }}', this)"
+                                      title="Click for details">
+                                    {% if div.schedule_variance >= 0 %}+{% endif %}{{ '{:.1f}'.format(div.schedule_variance_pct) }}%
+                                </span>
+                                {% else %}<span class="text-gray-400">-</span>{% endif %}
                             </td>
                             <td class="py-3 px-4 text-center {% if div.cpi and div.cpi >= 1 %}text-green-600{% elif div.cpi %}text-red-600{% endif %}">
                                 {{ div.cpi if div.cpi else '-' }}
@@ -933,6 +939,21 @@
     </div>
 </div>
 
+<!-- Schedule Variance Drilldown Popover -->
+<div id="schedule-drilldown-popover" class="fixed bg-white rounded-xl shadow-2xl border border-gray-200 z-50 w-[560px] max-h-[500px] overflow-hidden" style="display: none;">
+    <div class="sticky top-0 bg-white border-b px-4 py-3 flex justify-between items-center">
+        <h3 id="schedule-drilldown-title" class="font-semibold text-gray-900">Schedule Variance</h3>
+        <button onclick="closeScheduleDrilldown()" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+        </button>
+    </div>
+    <div id="schedule-drilldown-content" class="p-4 overflow-y-auto max-h-[440px]">
+        <!-- Content loaded dynamically -->
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_scripts %}
@@ -1338,5 +1359,162 @@ async function loadScheduleProgress() {
 
 // Load schedule progress on page load
 loadScheduleProgress();
+
+// Schedule Variance Drilldown functions
+function showScheduleVarianceDrilldown(division, trigger) {
+    const popover = document.getElementById('schedule-drilldown-popover');
+    const title = document.getElementById('schedule-drilldown-title');
+    const content = document.getElementById('schedule-drilldown-content');
+
+    // Position popover near trigger
+    const rect = trigger.getBoundingClientRect();
+    let left = rect.left;
+    let top = rect.bottom + 8;
+
+    // Keep within viewport
+    if (left + 560 > window.innerWidth - 20) left = window.innerWidth - 580;
+    if (left < 20) left = 20;
+    if (top + 400 > window.innerHeight - 20) top = rect.top - 408;
+    if (top < 20) top = 20;
+
+    popover.style.left = left + 'px';
+    popover.style.top = top + 'px';
+    popover.style.display = 'block';
+
+    title.textContent = `${division} - Schedule Variance`;
+    content.innerHTML = `
+        <div class="flex items-center justify-center py-8">
+            <svg class="animate-spin h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span class="ml-2 text-gray-500">Loading...</span>
+        </div>`;
+
+    fetch(`/api/schedule/variance-drilldown/${encodeURIComponent(division)}`)
+        .then(response => response.json())
+        .then(data => renderScheduleVarianceDrilldown(data))
+        .catch(err => {
+            content.innerHTML = '<div class="text-center py-8 text-red-500">Error loading data</div>';
+        });
+}
+
+function closeScheduleDrilldown() {
+    document.getElementById('schedule-drilldown-popover').style.display = 'none';
+}
+
+function renderScheduleVarianceDrilldown(data) {
+    const content = document.getElementById('schedule-drilldown-content');
+
+    if (!data.success) {
+        content.innerHTML = `<div class="text-center py-8 text-red-500">${data.error || 'Error loading data'}</div>`;
+        return;
+    }
+
+    const statusColor = data.status === 'over' ? 'text-red-600' : data.status === 'under' ? 'text-green-600' : 'text-gray-600';
+    const statusBg = data.status === 'over' ? 'bg-red-50' : data.status === 'under' ? 'bg-green-50' : 'bg-gray-50';
+    const statusLabel = data.status === 'over' ? 'Over Schedule' : data.status === 'under' ? 'Under Schedule' : 'On Track';
+
+    let html = `
+        <!-- Summary -->
+        <div class="grid grid-cols-3 gap-3 mb-4 pb-4 border-b">
+            <div class="text-center">
+                <div class="text-xs text-gray-500 mb-1">Budget</div>
+                <div class="font-semibold text-gray-900">${data.budget_display}</div>
+            </div>
+            <div class="text-center">
+                <div class="text-xs text-gray-500 mb-1">Expected</div>
+                <div class="font-semibold text-blue-600">${data.expected_display}</div>
+            </div>
+            <div class="text-center">
+                <div class="text-xs text-gray-500 mb-1">Actual</div>
+                <div class="font-semibold text-gray-900">${data.actual_display}</div>
+            </div>
+        </div>
+
+        <!-- Variance -->
+        <div class="p-3 rounded-lg ${statusBg} mb-4">
+            <div class="flex justify-between items-center">
+                <div>
+                    <span class="text-xs text-gray-500">Variance</span>
+                    <div class="font-bold text-lg ${statusColor}">${data.variance_display}</div>
+                </div>
+                <div class="text-right">
+                    <span class="text-xs text-gray-500">Status</span>
+                    <div class="font-semibold ${statusColor}">${statusLabel}</div>
+                </div>
+            </div>
+        </div>`;
+
+    // Activities section
+    if (data.activities && data.activities.length > 0) {
+        html += `
+            <div class="mb-4">
+                <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                    Activities (${data.activities.length})
+                </div>
+                <div class="space-y-2 max-h-[180px] overflow-y-auto">`;
+
+        for (const act of data.activities) {
+            const progressColor = act.progress >= 75 ? 'bg-green-500' : act.progress >= 50 ? 'bg-yellow-500' : 'bg-blue-500';
+            html += `
+                <div class="flex items-center justify-between text-sm p-2 bg-gray-50 rounded">
+                    <div class="flex-1 min-w-0 mr-2">
+                        <div class="font-medium text-gray-900 truncate">${act.name}</div>
+                        <div class="text-xs text-gray-500">${act.start || '?'} → ${act.finish || '?'}</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div class="${progressColor} h-full" style="width: ${act.progress}%"></div>
+                        </div>
+                        <span class="text-xs text-gray-600 w-10 text-right">${act.progress}%</span>
+                    </div>
+                </div>`;
+        }
+        html += '</div></div>';
+    }
+
+    // Actual cost items section
+    if (data.actual_items && data.actual_items.length > 0) {
+        html += `
+            <div>
+                <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                    Actual Costs (${data.actual_items.length})
+                </div>
+                <div class="space-y-1 max-h-[120px] overflow-y-auto">`;
+
+        for (const item of data.actual_items.slice(0, 10)) {
+            html += `
+                <div class="flex justify-between text-sm py-1 border-b border-gray-100">
+                    <span class="text-gray-700 truncate mr-2">${item.description}</span>
+                    <span class="font-medium text-gray-900 whitespace-nowrap">${item.amount_display}</span>
+                </div>`;
+        }
+
+        if (data.actual_items.length > 10) {
+            html += `<div class="text-xs text-gray-500 text-center pt-2">+ ${data.actual_items.length - 10} more items</div>`;
+        }
+        html += '</div></div>';
+    }
+
+    content.innerHTML = html;
+}
+
+// Close drilldown on click outside
+document.addEventListener('click', function(e) {
+    const popover = document.getElementById('schedule-drilldown-popover');
+    if (popover && popover.style.display === 'block') {
+        if (!popover.contains(e.target) && !e.target.closest('[onclick*="showScheduleVarianceDrilldown"]')) {
+            closeScheduleDrilldown();
+        }
+    }
+});
+
+// Close drilldown on escape
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeScheduleDrilldown();
+    }
+});
 </script>
 {% endblock %}
