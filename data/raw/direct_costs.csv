@@ -1,0 +1,66 @@
+cost_code,name,date,amount,vendor,type
+03-2100,Concrete FTG Pour N,2024-07-22,85000,ABC Concrete,M
+03-2100,Concrete FTG Rebar N,2024-07-18,42000,Steel Supply Co,M
+03-2100,Concrete FTG Pour S,2024-08-13,88000,ABC Concrete,M
+03-2100,Concrete FTG Rebar S,2024-08-09,44000,Steel Supply Co,M
+03-2100,SOG Prep & Pour,2024-09-06,125000,ABC Concrete,M
+03-2100,SOG Rebar,2024-09-03,55000,Steel Supply Co,M
+05-1200,Structural Steel Erect 1st,2024-10-01,185000,Iron Works Inc,M
+05-1200,Metal Deck 1st FL,2024-10-08,65000,Iron Works Inc,M
+05-1200,Structural Steel Erect 2nd,2024-10-29,195000,Iron Works Inc,M
+05-1200,Metal Deck 2nd FL,2024-11-05,68000,Iron Works Inc,M
+04-2000,CMU 1st FL,2024-12-03,125000,Masonry Pros,M
+04-2000,CMU 2nd FL,2024-12-24,128000,Masonry Pros,M
+04-2000,Brick Facade N,2025-01-23,145000,Masonry Pros,M
+04-2000,Brick Facade S,2025-02-20,148000,Masonry Pros,M
+07-5000,Roof Vapor Barrier,2025-02-27,35000,Roof Masters,M
+07-5000,Roof Insulation,2025-03-10,55000,Roof Masters,M
+07-5000,PVC Roofing,2025-03-24,185000,Roof Masters,M
+07-5000,Green Roof,2025-04-09,225000,Roof Masters,M
+08-4400,Windows N,2025-05-13,165000,Glass Works,M
+08-4400,Windows S,2025-06-03,168000,Glass Works,M
+07-9000,AVB Membrane,2025-06-13,45000,Waterproof Co,M
+22-0000,U.G. Plumbing,2025-06-27,85000,MEP Systems,L
+22-0000,Plumbing Rough 1st,2025-07-15,125000,MEP Systems,L
+22-0000,Plumbing Rough 2nd,2025-07-31,128000,MEP Systems,L
+23-0000,HVAC Ductwork 1st,2025-08-21,165000,MEP Systems,L
+23-0000,HVAC Ductwork 2nd,2025-09-11,168000,MEP Systems,L
+23-0000,HVAC Piping,2025-09-25,95000,MEP Systems,L
+23-0000,ACCU Units,2025-10-02,285000,MEP Systems,E
+26-0000,Electrical Rough 1st,2025-10-18,145000,Sparks Electric,L
+26-0000,Electrical Rough 2nd,2025-11-05,148000,Sparks Electric,L
+26-0000,Panels,2025-11-12,85000,Sparks Electric,E
+21-0000,Fire Sprinkler Main,2025-11-22,65000,Fire Safe Inc,M
+21-0000,Fire Sprinkler Laterals,2025-12-08,95000,Fire Safe Inc,M
+09-2000,Frame Walls 1st,2025-12-20,75000,Interior Finish,L
+09-2000,Frame Walls 2nd,2026-01-03,78000,Interior Finish,L
+09-2000,Insulation,2026-01-15,45000,Interior Finish,M
+09-2000,Drywall,2026-01-31,125000,Interior Finish,L
+09-2000,Ceiling Grid 1st,2026-02-10,55000,Interior Finish,L
+09-2000,Ceiling Grid 2nd,2026-02-19,58000,Interior Finish,L
+01-0000,General Conditions May,2024-05-31,42000,Self,O
+01-0000,General Conditions Jun,2024-06-30,42000,Self,O
+01-0000,General Conditions Jul,2024-07-31,42000,Self,O
+01-0000,General Conditions Aug,2024-08-31,42000,Self,O
+01-0000,General Conditions Sep,2024-09-30,42000,Self,O
+01-0000,General Conditions Oct,2024-10-31,42000,Self,O
+01-0000,General Conditions Nov,2024-11-30,42000,Self,O
+01-0000,General Conditions Dec,2024-12-31,42000,Self,O
+01-0000,General Conditions Jan,2025-01-31,42000,Self,O
+01-0000,General Conditions Feb,2025-02-28,42000,Self,O
+01-0000,General Conditions Mar,2025-03-31,42000,Self,O
+01-0000,General Conditions Apr,2025-04-30,42000,Self,O
+01-0000,General Conditions May,2025-05-31,42000,Self,O
+01-0000,General Conditions Jun,2025-06-30,42000,Self,O
+01-0000,General Conditions Jul,2025-07-31,42000,Self,O
+01-0000,General Conditions Aug,2025-08-31,42000,Self,O
+01-0000,General Conditions Sep,2025-09-30,42000,Self,O
+01-0000,General Conditions Oct,2025-10-31,42000,Self,O
+01-0000,General Conditions Nov,2025-11-30,42000,Self,O
+01-0000,General Conditions Dec,2025-12-31,42000,Self,O
+01-0000,General Conditions Jan,2026-01-31,42000,Self,O
+01-0000,General Conditions Feb,2026-02-28,42000,Self,O
+02-4000,Sitework - Excavation,2024-05-30,125000,Earth Movers,E
+02-4000,Sitework - Micropiles,2024-06-18,185000,Foundation Spec,M
+02-4000,Sitework - SOE Lagging,2024-07-02,145000,Foundation Spec,M
+02-4000,Sitework - Backfill,2024-07-09,55000,Earth Movers,M

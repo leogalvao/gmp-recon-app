@@ -320,13 +320,247 @@ def info(model: str):
             click.echo(f"  Target - mean: {stats['target']['mean']:.4f}, std: {stats['target']['std']:.4f}")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEDULE-DRIVEN COMMANDS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@cli.command('parse-schedule')
+@click.option('--data-dir', default='data/raw', help='Directory containing data files')
+def parse_schedule(data_dir):
+    """Parse schedule and show activity -> trade mappings.
+
+    This is the foundation of schedule-driven forecasting.
+
+    Example:
+        python cli.py parse-schedule --data-dir data/raw
+    """
+    from src.schedule.parser import ScheduleParser
+    from src.data.loaders import DataLoader
+
+    click.echo(click.style('Schedule-Driven GMP Forecasting', fg='cyan', bold=True))
+    click.echo(f"Loading data from: {data_dir}\n")
+
+    loader = DataLoader(data_dir)
+    data = loader.load_all()
+
+    if data['schedule'] is None:
+        click.echo(click.style("Error: schedule.csv not found", fg='red'))
+        return
+
+    parser = ScheduleParser(data['schedule'])
+
+    click.echo("=" * 90)
+    click.echo(click.style("SCHEDULE PARSING RESULTS", fg='green', bold=True))
+    click.echo("=" * 90)
+
+    if parser.project_start and parser.project_end:
+        click.echo(f"\nProject: {parser.project_start.strftime('%Y-%m-%d')} -> {parser.project_end.strftime('%Y-%m-%d')}")
+        click.echo(f"Duration: {(parser.project_end - parser.project_start).days} days")
+
+    click.echo("\n" + "-" * 90)
+    click.echo(click.style("PHASES:", bold=True))
+    for phase in parser.phases:
+        click.echo(f"  {phase.id:20} | {phase.start.strftime('%Y-%m-%d')} -> {phase.end.strftime('%Y-%m-%d')} | {len(phase.activities):3} activities")
+
+    click.echo("\n" + "-" * 90)
+    click.echo(click.style("ACTIVITY -> TRADE MAPPINGS (sample):", bold=True))
+    click.echo(f"{'Activity ID':<15} {'Activity Name':<40} {'Trade':<30}")
+    click.echo("-" * 90)
+
+    for activity in parser.activities[:30]:
+        name = activity.name[:38] + '..' if len(activity.name) > 40 else activity.name
+        click.echo(f"{activity.id:<15} {name:<40} {activity.primary_trade:<30}")
+
+    if len(parser.activities) > 30:
+        click.echo(f"\n... and {len(parser.activities) - 30} more activities")
+
+    # Trade summary
+    click.echo("\n" + "-" * 90)
+    click.echo(click.style("TRADE SUMMARY:", bold=True))
+    summary = parser.get_trade_summary()
+    for _, row in summary.sort_values('activity_count', ascending=False).head(15).iterrows():
+        click.echo(f"  {row['trade']:<35} {row['activity_count']:3} activities, {row['total_duration_days']:5} total days")
+
+
+@cli.command('show-allocations')
+@click.option('--data-dir', default='data/raw', help='Directory containing data files')
+def show_allocations(data_dir):
+    """Show expected cost allocations by activity.
+
+    Displays how GMP budget is allocated across schedule activities.
+
+    Example:
+        python cli.py show-allocations --data-dir data/raw
+    """
+    from src.schedule.parser import ScheduleParser
+    from src.schedule.cost_allocator import ActivityCostAllocator
+    from src.data.loaders import DataLoader
+
+    click.echo(click.style('Schedule-Driven Cost Allocations', fg='cyan', bold=True))
+
+    loader = DataLoader(data_dir)
+    data = loader.load_all()
+
+    if data['schedule'] is None or data['breakdown'] is None:
+        click.echo(click.style("Error: schedule.csv or breakdown.csv not found", fg='red'))
+        return
+
+    parser = ScheduleParser(data['schedule'])
+    allocator = ActivityCostAllocator(parser, data['breakdown'])
+
+    click.echo("\n" + "=" * 100)
+    click.echo(click.style("ACTIVITY COST ALLOCATIONS (Expected by Schedule)", fg='green', bold=True))
+    click.echo("=" * 100)
+
+    for trade, allocs in sorted(
+        allocator.allocations.items(),
+        key=lambda x: sum(a.expected_cost for a in x[1]),
+        reverse=True
+    )[:10]:
+        total = sum(a.expected_cost for a in allocs)
+        click.echo(f"\n{trade}: ${total:,.0f} across {len(allocs)} activities")
+        click.echo("-" * 80)
+
+        for alloc in sorted(allocs, key=lambda a: a.expected_cost, reverse=True)[:5]:
+            click.echo(f"  {alloc.activity.name[:50]:<52} ${alloc.expected_cost:>12,.0f}")
+
+
+@cli.command('schedule-train')
+@click.option('--data-dir', default='data/raw', help='Directory containing data files')
+@click.option('--epochs', default=100, type=int, help='Training epochs')
+@click.option('--output', default='models/schedule_driven', help='Output directory')
+def schedule_train(data_dir, epochs, output):
+    """Train schedule-driven forecasting models.
+
+    Trains models that use schedule position as the primary driver.
+
+    Example:
+        python cli.py schedule-train --data-dir data/raw --epochs 100
+    """
+    from src.training.schedule_driven_trainer import ScheduleDrivenTrainer
+    from src.data.loaders import DataLoader
+
+    click.echo(click.style('Schedule-Driven Training Pipeline', fg='cyan', bold=True))
+
+    loader = DataLoader(data_dir)
+    data = loader.load_all()
+
+    required = ['schedule', 'breakdown', 'direct_costs']
+    missing = [k for k in required if data.get(k) is None]
+    if missing:
+        click.echo(click.style(f"Error: Missing data files: {missing}", fg='red'))
+        return
+
+    trainer = ScheduleDrivenTrainer()
+    trainer.prepare(
+        schedule_df=data['schedule'],
+        gmp_breakdown_df=data['breakdown'],
+        direct_costs_df=data['direct_costs'],
+        budget_df=data.get('budget')
+    )
+
+    click.echo(f"\nTraining models ({epochs} epochs)...")
+    results = trainer.train(epochs=epochs)
+
+    # Save models
+    trainer.save(output)
+
+    click.echo("\n" + "=" * 80)
+    click.echo(click.style("TRAINING COMPLETE", fg='green', bold=True))
+    click.echo("=" * 80)
+    click.echo(f"\nTrained {len(results)} trade models")
+    click.echo(f"Models saved to: {output}")
+
+    for trade, result in results.items():
+        click.echo(f"  {trade[:30]:<32} loss={result.final_loss:.4f}, samples={result.samples}")
+
+
+@cli.command('schedule-forecast')
+@click.option('--data-dir', default='data/raw', help='Directory containing data files')
+@click.option('--epochs', default=50, type=int, help='Training epochs (quick mode)')
+def schedule_forecast(data_dir, epochs):
+    """Generate schedule-driven forecasts.
+
+    Trains models and generates forecasts showing schedule variance.
+
+    Example:
+        python cli.py schedule-forecast --data-dir data/raw
+    """
+    from src.training.schedule_driven_trainer import ScheduleDrivenTrainer
+    from src.data.loaders import DataLoader
+
+    click.echo(click.style('Schedule-Driven Forecast', fg='cyan', bold=True))
+
+    loader = DataLoader(data_dir)
+    data = loader.load_all()
+
+    required = ['schedule', 'breakdown', 'direct_costs']
+    missing = [k for k in required if data.get(k) is None]
+    if missing:
+        click.echo(click.style(f"Error: Missing data files: {missing}", fg='red'))
+        return
+
+    trainer = ScheduleDrivenTrainer()
+    trainer.prepare(
+        schedule_df=data['schedule'],
+        gmp_breakdown_df=data['breakdown'],
+        direct_costs_df=data['direct_costs']
+    )
+    trainer.train(epochs=epochs)
+
+    click.echo("\n" + "=" * 110)
+    click.echo(click.style("SCHEDULE-DRIVEN FORECAST RESULTS", fg='green', bold=True))
+    click.echo("=" * 110)
+
+    click.echo(f"\n{'Trade':<30} {'Phase':<12} {'GMP':>12} {'Spent':>12} {'Expected':>12} {'Variance':>12} {'Status'}")
+    click.echo("-" * 110)
+
+    for trade_name in sorted(trainer.models.keys()):
+        result = trainer.forecast(trade_name)
+        if result:
+            variance = result.schedule_variance
+            status = "OVER" if variance > 0 else "OK"
+            status_color = 'red' if variance > 0 else 'green'
+            active = "*" if result.trade_phase_active else " "
+
+            click.echo(
+                f"{trade_name[:28]:<30} "
+                f"{result.current_phase[:10]:<12} "
+                f"${result.gmp_budget:>11,.0f} "
+                f"${result.spent_to_date:>11,.0f} "
+                f"${result.expected_by_schedule:>11,.0f} "
+                f"${variance:>11,.0f} "
+                f"{active} {click.style(status, fg=status_color)}"
+            )
+
+    click.echo("-" * 110)
+    if result:
+        click.echo(f"\nProject % Complete: {result.project_pct_complete:.1%}")
+    click.echo("\n* = Trade's phase currently active")
+    click.echo("Variance = Actual - Expected (positive = over-spending vs schedule)")
+
+
 @cli.command()
 def version():
     """Display version information."""
     click.echo(click.style('GMP Cost Forecasting System', fg='cyan', bold=True))
-    click.echo("Version: 1.0.0")
+    click.echo("Version: 2.0.0")
+    click.echo("")
+    click.echo("Architectures:")
+    click.echo("  1. Building-Based Forecasting (LSTM/Transformer)")
+    click.echo("     - Uses building parameters (sqft, stories, etc.)")
+    click.echo("     - Gaussian Mixture / Quantile outputs")
+    click.echo("")
+    click.echo("  2. Schedule-Driven Forecasting (NEW)")
+    click.echo("     - Schedule is PRIMARY driver")
+    click.echo("     - Activity -> Trade cost allocation")
+    click.echo("     - Schedule variance tracking")
     click.echo("")
     click.echo("Components:")
+    click.echo("  - Schedule Parser (activity -> trade mapping)")
+    click.echo("  - Activity Cost Allocator (expected cost per activity)")
+    click.echo("  - Schedule-Driven Feature Builder")
+    click.echo("  - Three-Branch LSTM Model (Schedule + Trade + Cost)")
     click.echo("  - Domain Entities (DirectCost, BudgetLine, GMPAllocation, SubJob)")
     click.echo("  - Cost Mapping Pipeline (Direct -> Budget -> GMP)")
     click.echo("  - LSTM Forecaster (Gaussian Mixture output)")

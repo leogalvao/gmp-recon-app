@@ -1,0 +1,70 @@
+Activity ID,Activity Name,Duration,Start,Finish,Total Float
+SITE-0100,Mobilization,5,01-May-24,07-May-24,0
+SITE-0110,Survey & Layout,3,08-May-24,10-May-24,0
+SITE-0200,Tree Protection,2,13-May-24,14-May-24,5
+SITE-0210,Topsoil Strip & Stockpile,4,15-May-24,20-May-24,3
+SITE-0220,Excavation - Building Pad,8,21-May-24,30-May-24,0
+SITE-0230,Drill Micropiles,12,03-Jun-24,18-Jun-24,0
+SITE-0240,SOE Lagging,10,19-Jun-24,02-Jul-24,2
+SITE-0250,Backfill & Compaction,5,03-Jul-24,09-Jul-24,0
+FND-0100,FTG Layout N,3,10-Jul-24,12-Jul-24,0
+FND-0110,FTG Rebar N,4,15-Jul-24,18-Jul-24,0
+FND-0120,Pour FTG N,2,19-Jul-24,22-Jul-24,0
+FND-0130,Cure FTG N,7,23-Jul-24,31-Jul-24,5
+FND-0200,FTG Layout S,3,01-Aug-24,05-Aug-24,0
+FND-0210,FTG Rebar S,4,06-Aug-24,09-Aug-24,0
+FND-0220,Pour FTG S,2,12-Aug-24,13-Aug-24,0
+FND-0230,Cure FTG S,7,14-Aug-24,22-Aug-24,5
+FND-0300,SOG Prep,3,23-Aug-24,27-Aug-24,0
+FND-0310,SOG Rebar,5,28-Aug-24,03-Sep-24,0
+FND-0320,Pour SOG,3,04-Sep-24,06-Sep-24,0
+FND-0330,Cure SOG,7,09-Sep-24,17-Sep-24,5
+STL-0100,Erect Steel 1st FL N,10,18-Sep-24,01-Oct-24,0
+STL-0110,Metal Deck 1st FL N,5,02-Oct-24,08-Oct-24,0
+STL-0120,Nelson Studs 1st FL N,3,09-Oct-24,11-Oct-24,2
+STL-0130,Pour Deck 1st FL N,2,14-Oct-24,15-Oct-24,0
+STL-0200,Erect Steel 2nd FL S,10,16-Oct-24,29-Oct-24,0
+STL-0210,Metal Deck 2nd FL S,5,30-Oct-24,05-Nov-24,0
+STL-0220,Nelson Studs 2nd FL S,3,06-Nov-24,08-Nov-24,2
+STL-0230,Pour Deck 2nd FL S,2,11-Nov-24,12-Nov-24,0
+MSN-0100,CMU 1st FL N,15,13-Nov-24,03-Dec-24,0
+MSN-0110,CMU 1st FL S,15,04-Dec-24,24-Dec-24,0
+MSN-0200,Brick Facade N,20,27-Dec-24,23-Jan-25,0
+MSN-0210,Brick Facade S,20,24-Jan-25,20-Feb-25,0
+ROOF-0100,Roof Vapor Barrier,5,21-Feb-25,27-Feb-25,0
+ROOF-0110,Roof Insulation,7,28-Feb-25,10-Mar-25,0
+ROOF-0120,PVC Roofing,10,11-Mar-25,24-Mar-25,0
+ROOF-0130,Green Roof N,12,25-Mar-25,09-Apr-25,3
+ROOF-0140,Skylights,5,10-Apr-25,16-Apr-25,5
+ROOF-0150,Parapet Coping,4,17-Apr-25,22-Apr-25,2
+WIN-0100,SF Window Install N,15,23-Apr-25,13-May-25,0
+WIN-0110,SF Window Install S,15,14-May-25,03-Jun-25,0
+WIN-0120,AVB Membrane,8,04-Jun-25,13-Jun-25,0
+MEP-0100,U.G. Plumbing,10,16-Jun-25,27-Jun-25,0
+MEP-0110,Plumbing Rough-In 1st FL,12,30-Jun-25,15-Jul-25,0
+MEP-0120,Plumbing Rough-In 2nd FL,12,16-Jul-25,31-Jul-25,0
+MEP-0200,HVAC Ductwork 1st FL,15,01-Aug-25,21-Aug-25,0
+MEP-0210,HVAC Ductwork 2nd FL,15,22-Aug-25,11-Sep-25,0
+MEP-0220,HVAC Piping,10,12-Sep-25,25-Sep-25,0
+MEP-0230,Install ACCU Units,5,26-Sep-25,02-Oct-25,0
+ELEC-0100,Electrical Rough-In 1st FL,12,03-Oct-25,18-Oct-25,0
+ELEC-0110,Electrical Rough-In 2nd FL,12,21-Oct-25,05-Nov-25,0
+ELEC-0120,Panel Installation,5,06-Nov-25,12-Nov-25,0
+FS-0100,Fire Sprinkler Main,8,13-Nov-25,22-Nov-25,0
+FS-0110,Fire Sprinkler Laterals,10,25-Nov-25,08-Dec-25,0
+FRM-0100,Frame Interior Walls 1st FL,10,09-Dec-25,20-Dec-25,0
+FRM-0110,Frame Interior Walls 2nd FL,10,23-Dec-25,03-Jan-26,0
+FRM-0120,Insulation,8,06-Jan-26,15-Jan-26,0
+FRM-0130,Drywall,12,16-Jan-26,31-Jan-26,0
+FRM-0140,Ceiling Grid 1st FL,7,02-Feb-26,10-Feb-26,0
+FRM-0150,Ceiling Grid 2nd FL,7,11-Feb-26,19-Feb-26,0
+FIN-0100,Inspections,3,20-Feb-26,24-Feb-26,0
+FIN-0110,Close-In Punchlist,5,25-Feb-26,03-Mar-26,0
+SITE-2000,Sidewalks,8,04-Mar-26,13-Mar-26,0
+SITE-2010,Playground Install,10,16-Mar-26,27-Mar-26,0
+SITE-2020,Shade Structure,5,30-Mar-26,03-Apr-26,0
+SITE-2030,Hand Rails,3,06-Apr-26,08-Apr-26,0
+LAND-0100,Place Topsoil,4,09-Apr-26,14-Apr-26,0
+LAND-0110,Plant Trees,3,15-Apr-26,17-Apr-26,0
+LAND-0120,Sod Installation,5,20-Apr-26,24-Apr-26,0
+LAND-0130,Mulch,2,27-Apr-26,28-Apr-26,0
