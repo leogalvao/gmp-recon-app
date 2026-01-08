@@ -3591,6 +3591,119 @@ async def get_schedule_summary(db: Session = Depends(get_db)):
     return compute_project_schedule_summary(db)
 
 
+@app.get("/api/schedule/variance-drilldown/{trade}")
+async def get_schedule_variance_drilldown(trade: str, db: Session = Depends(get_db)):
+    """
+    Get detailed schedule variance breakdown for a specific trade.
+    Shows activities, expected vs actual costs, and timeline.
+    """
+    from pathlib import Path
+    from datetime import datetime
+    from urllib.parse import unquote
+
+    trade = unquote(trade)
+    data_dir = Path(__file__).parent.parent / "data" / "raw"
+    schedule_file = data_dir / "schedule.csv"
+    breakdown_file = data_dir / "breakdown.csv"
+    direct_costs_file = data_dir / "direct_costs.csv"
+
+    if not all(f.exists() for f in [schedule_file, breakdown_file, direct_costs_file]):
+        return {"success": False, "error": "Schedule data files not found"}
+
+    try:
+        from src.schedule.parser import ScheduleParser
+        from src.schedule.cost_allocator import ActivityCostAllocator
+
+        schedule_df = pd.read_csv(schedule_file)
+        breakdown_df = pd.read_csv(breakdown_file)
+        direct_costs_df = pd.read_csv(direct_costs_file)
+
+        parser = ScheduleParser(schedule_df)
+        allocator = ActivityCostAllocator(parser, breakdown_df)
+
+        if trade not in allocator.gmp:
+            return {"success": False, "error": f"Trade '{trade}' not found"}
+
+        as_of = datetime.now()
+        budget = allocator.gmp.get(trade, 0)
+        expected = allocator.get_expected_cost_to_date(trade, as_of)
+
+        # Get actual costs for this trade
+        amount_col = next((c for c in ['amount', 'Amount'] if c in direct_costs_df.columns), None)
+        date_col = next((c for c in ['date', 'Date'] if c in direct_costs_df.columns), None)
+
+        actual_items = []
+        total_actual = 0
+        if amount_col:
+            for _, row in direct_costs_df.iterrows():
+                name = str(row.get('name', '') or row.get('Description', ''))
+                mapped_trade, _, _, _ = parser._map_to_trade(name)
+                if mapped_trade == trade:
+                    amount = float(row[amount_col])
+                    total_actual += amount
+                    actual_items.append({
+                        "name": name,
+                        "amount": amount,
+                        "amount_display": f"${amount:,.0f}",
+                        "date": str(row.get(date_col, '')) if date_col else None,
+                        "vendor": str(row.get('vendor', '') or row.get('Vendor', ''))
+                    })
+
+        # Get activities for this trade
+        activities = []
+        if trade in allocator.allocations:
+            for alloc in allocator.allocations[trade]:
+                activity = alloc.activity
+                act_start = activity.start.date() if hasattr(activity.start, 'date') else activity.start
+                act_finish = activity.finish.date() if hasattr(activity.finish, 'date') else activity.finish
+                today = datetime.now().date()
+
+                status = "complete" if activity.is_complete(as_of) else "active" if activity.is_active(as_of) else "pending"
+                pct = activity.pct_complete(as_of) if hasattr(activity, 'pct_complete') else 0
+
+                activities.append({
+                    "name": activity.name,
+                    "start": act_start.isoformat(),
+                    "finish": act_finish.isoformat(),
+                    "duration": activity.duration_days,
+                    "expected_cost": alloc.expected_cost,
+                    "expected_cost_display": f"${alloc.expected_cost:,.0f}",
+                    "status": status,
+                    "pct_complete": round(pct * 100, 1) if pct else 0
+                })
+
+        # Sort activities by start date
+        activities.sort(key=lambda x: x["start"])
+
+        # Calculate variance
+        variance = total_actual - expected
+        variance_pct = (variance / expected * 100) if expected > 0 else 0
+        status = "over" if variance > 0 else "under" if variance < 0 else "on_track"
+
+        return {
+            "success": True,
+            "trade": trade,
+            "budget": budget,
+            "budget_display": f"${budget:,.0f}",
+            "expected": expected,
+            "expected_display": f"${expected:,.0f}",
+            "actual": total_actual,
+            "actual_display": f"${total_actual:,.0f}",
+            "variance": variance,
+            "variance_display": f"${variance:+,.0f}",
+            "variance_pct": round(variance_pct, 1),
+            "status": status,
+            "activities": activities,
+            "activity_count": len(activities),
+            "actual_items": actual_items[:20],  # Limit to 20 items
+            "actual_item_count": len(actual_items)
+        }
+
+    except Exception as e:
+        logger.exception(f"Error getting schedule variance drilldown for {trade}")
+        return {"success": False, "error": str(e)}
+
+
 @app.get("/api/schedule/forecast-all")
 async def get_schedule_forecast_all(db: Session = Depends(get_db)):
     """
