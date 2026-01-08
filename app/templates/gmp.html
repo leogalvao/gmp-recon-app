@@ -212,6 +212,11 @@
         padding: 10px 14px;
         white-space: nowrap;
     }
+    #gmp-table thead {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
     #gmp-table th {
         background: #f8fafc;
         font-weight: 600;
@@ -220,8 +225,49 @@
         letter-spacing: 0.05em;
         color: #475569;
     }
+    /* Zebra striping */
+    #gmp-table tbody tr:nth-child(odd) {
+        background: white;
+    }
+    #gmp-table tbody tr:nth-child(even) {
+        background: #f9fafb;
+    }
     #gmp-table tbody tr:hover {
-        background: #f0f9ff;
+        background: #eff6ff !important;
+    }
+    /* Bad variance highlighting */
+    #gmp-table tbody tr.high-overrun {
+        background: #fef2f2 !important;
+        border-left: 4px solid #ef4444;
+    }
+    #gmp-table tbody tr.high-overrun:hover {
+        background: #fee2e2 !important;
+    }
+
+    /* Bulk action bar */
+    .bulk-action-bar {
+        position: sticky;
+        bottom: 0;
+        z-index: 10;
+        background: #1f2937;
+        color: white;
+        padding: 0.75rem 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-radius: 0 0 0.5rem 0.5rem;
+    }
+
+    .bulk-action-bar button {
+        padding: 0.375rem 0.75rem;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 0.375rem;
+        font-size: 0.875rem;
+        transition: background-color 0.2s;
+    }
+
+    .bulk-action-bar button:hover {
+        background: rgba(255, 255, 255, 0.2);
     }
 
     /* Right rail */
@@ -231,6 +277,62 @@
     .right-rail .card {
         position: sticky;
         top: 80px;
+    }
+
+    /* Sidebar card sections */
+    .sidebar-card {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .sidebar-card-title {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.75rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #f3f4f6;
+    }
+
+    .sidebar-card-content {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    /* Sidebar label/value pairs - prevent overlap */
+    .sidebar-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+        min-height: 20px;
+    }
+
+    .sidebar-row .label {
+        flex-shrink: 0;
+        max-width: 55%;
+        font-size: 0.875rem;
+        color: #6b7280;
+        line-height: 1.4;
+    }
+
+    .sidebar-row .value {
+        flex-shrink: 1;
+        min-width: 0;
+        text-align: right;
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: #111827;
+        font-variant-numeric: tabular-nums;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     /* Data model badge */
@@ -415,7 +517,7 @@
                     </thead>
                     <tbody>
                         {% for row in rows %}
-                        <tr class="border-b border-gray-100" data-gmp="{{ row.gmp_division }}" data-actual-total="{{ row.actual_west_raw + row.actual_east_raw }}">
+                        <tr class="border-b border-gray-100 {% if not row.surplus_positive and row.surplus_or_overrun_raw is defined and row.surplus_or_overrun_raw < -5000000 %}high-overrun{% endif %}" data-gmp="{{ row.gmp_division }}" data-actual-total="{{ row.actual_west_raw + row.actual_east_raw }}">
                             <td class="font-medium text-gray-900">{{ row.gmp_division }}</td>
                             <td class="text-right text-gray-700">{{ row.gmp_amount }}</td>
                             <!-- Budget West (from breakdown.csv) -->
@@ -522,176 +624,177 @@
 
     <!-- Right Rail Summary -->
     <div class="right-rail">
-        <div class="card">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4">Summary</h2>
+        <div class="space-y-0">
+            <!-- Totals Card -->
+            <div class="sidebar-card">
+                <h3 class="sidebar-card-title">Totals</h3>
+                <div class="sidebar-card-content">
+                    <div class="sidebar-row">
+                        <span class="label">Total GMP</span>
+                        <span class="value">{{ summary.total_gmp }}</span>
+                    </div>
+                    <div class="sidebar-row">
+                        <span class="label">Total EAC</span>
+                        <span class="value">{{ summary.total_eac }}</span>
+                    </div>
+                    <div class="sidebar-row">
+                        <span class="label">Net Direct Costs</span>
+                        <span class="value">{{ summary.total_direct_costs_net }}</span>
+                    </div>
+                    <div class="sidebar-row">
+                        <span class="label">Credits</span>
+                        <span class="value text-green-600">{{ summary.total_credits_negative }}</span>
+                    </div>
+                </div>
+            </div>
 
-            <div class="space-y-4 summary-grid">
-                <!-- Totals -->
-                <div class="summary-section border-b pb-4">
-                    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Totals</h3>
-                    <div class="space-y-2 text-sm">
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Total GMP</span>
-                            <span class="font-semibold text-gray-900">{{ summary.total_gmp }}</span>
+            <!-- Mapping Status Card -->
+            <div class="sidebar-card">
+                <h3 class="sidebar-card-title">Mapping Status</h3>
+                <div class="sidebar-card-content">
+                    <div class="sidebar-row">
+                        <span class="label">Budget → GMP</span>
+                        <span class="badge {% if mapping_stats.unmapped_budget_to_gmp > 0 %}badge-yellow{% else %}badge-green{% endif %}">
+                            {{ mapping_stats.mapped_budget_to_gmp }}/{{ mapping_stats.total_budget_rows }}
+                        </span>
+                    </div>
+                    <div class="sidebar-row">
+                        <span class="label">Direct → Budget</span>
+                        <span class="badge {% if mapping_stats.unmapped_direct_to_budget > 0 %}badge-yellow{% else %}badge-green{% endif %}">
+                            {{ mapping_stats.mapped_direct_to_budget }}/{{ mapping_stats.total_direct_rows }}
+                        </span>
+                    </div>
+                    {% if mapping_stats.unmapped_budget_to_gmp > 0 or mapping_stats.unmapped_direct_to_budget > 0 %}
+                    <a href="/mappings" class="block text-center text-blue-600 hover:underline text-xs mt-2">
+                        Review unmapped items →
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Data Model Card -->
+            <div class="sidebar-card">
+                <h3 class="sidebar-card-title flex items-center justify-between">
+                    <span>Data Model</span>
+                    <span class="relationship-badge">Certified</span>
+                </h3>
+                <div class="sidebar-card-content">
+                    <div class="p-2 bg-gray-50 rounded-md">
+                        <div class="flex items-center justify-between text-xs">
+                            <span class="font-medium text-gray-700">GMP → Budget</span>
+                            <span class="text-gray-500">1:N</span>
                         </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Total EAC</span>
-                            <span class="font-semibold text-gray-900">{{ summary.total_eac }}</span>
+                        <div class="text-xs text-gray-500 mt-1">
+                            {{ rows|length }} divisions → {{ mapping_stats.total_budget_rows }} codes
                         </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Net Direct Costs</span>
-                            <span class="font-semibold text-gray-900">{{ summary.total_direct_costs_net }}</span>
+                    </div>
+                    <div class="p-2 bg-gray-50 rounded-md">
+                        <div class="flex items-center justify-between text-xs">
+                            <span class="font-medium text-gray-700">Budget → Direct</span>
+                            <span class="text-gray-500">1:N</span>
                         </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Credits</span>
-                            <span class="font-semibold text-green-600">{{ summary.total_credits_negative }}</span>
+                        <div class="text-xs text-gray-500 mt-1">
+                            {{ mapping_stats.total_budget_rows }} codes → {{ mapping_stats.total_direct_rows }} costs
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <!-- Data Model Certification -->
-                <div class="summary-section border-b pb-4">
-                    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center">
-                        Data Model
-                        <span class="relationship-badge ml-2">Certified</span>
-                    </h3>
-                    <div class="space-y-3 text-sm">
-                        <div class="p-2 bg-gray-50 rounded-md">
-                            <div class="flex items-center justify-between mb-1">
-                                <span class="font-medium text-gray-700">GMP -> Budget</span>
-                                <span class="text-xs text-gray-500">1:N</span>
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                {{ rows|length }} GMP divisions -> {{ mapping_stats.total_budget_rows }} budget codes
-                            </div>
-                        </div>
-                        <div class="p-2 bg-gray-50 rounded-md">
-                            <div class="flex items-center justify-between mb-1">
-                                <span class="font-medium text-gray-700">Budget -> Direct Cost</span>
-                                <span class="text-xs text-gray-500">1:N</span>
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                {{ mapping_stats.total_budget_rows }} budget codes -> {{ mapping_stats.total_direct_rows }} direct costs
-                            </div>
-                        </div>
+            <!-- Duplicates Card -->
+            <div class="sidebar-card">
+                <h3 class="sidebar-card-title">Duplicates</h3>
+                <div class="sidebar-card-content">
+                    <div class="sidebar-row">
+                        <span class="label">Detected</span>
+                        <span class="value">{{ duplicates_summary.total_duplicates }}</span>
                     </div>
-                </div>
-
-                <!-- Mapping Status -->
-                <div class="summary-section border-b pb-4">
-                    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Mapping Status</h3>
-                    <div class="space-y-2 text-sm">
-                        <div class="flex justify-between items-center">
-                            <span class="text-gray-600">Budget -> GMP</span>
-                            <span class="badge {% if mapping_stats.unmapped_budget_to_gmp > 0 %}badge-yellow{% else %}badge-green{% endif %}">
-                                {{ mapping_stats.mapped_budget_to_gmp }}/{{ mapping_stats.total_budget_rows }}
-                            </span>
-                        </div>
-                        <div class="flex justify-between items-center">
-                            <span class="text-gray-600">Direct -> Budget</span>
-                            <span class="badge {% if mapping_stats.unmapped_direct_to_budget > 0 %}badge-yellow{% else %}badge-green{% endif %}">
-                                {{ mapping_stats.mapped_direct_to_budget }}/{{ mapping_stats.total_direct_rows }}
-                            </span>
-                        </div>
-                        {% if mapping_stats.unmapped_budget_to_gmp > 0 or mapping_stats.unmapped_direct_to_budget > 0 %}
-                        <a href="/mappings" class="block text-center text-blue-600 hover:underline text-xs mt-2">
-                            Review unmapped items
-                        </a>
+                    <div class="sidebar-row">
+                        <span class="label">Pending Review</span>
+                        {% if duplicates_summary.pending_review > 0 %}
+                        <span class="badge badge-yellow">{{ duplicates_summary.pending_review }}</span>
+                        {% else %}
+                        <span class="badge badge-green">0</span>
                         {% endif %}
                     </div>
+                    {% if duplicates_summary.pending_review > 0 %}
+                    <a href="/duplicates" class="block text-center text-blue-600 hover:underline text-xs mt-2">
+                        Review duplicates →
+                    </a>
+                    {% endif %}
                 </div>
+            </div>
 
-                <!-- Duplicates -->
-                <div class="summary-section border-b pb-4">
-                    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Duplicates</h3>
-                    <div class="space-y-2 text-sm">
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Detected</span>
-                            <span class="font-medium">{{ duplicates_summary.total_duplicates }}</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Pending</span>
-                            {% if duplicates_summary.pending_review > 0 %}
-                            <span class="badge badge-yellow">{{ duplicates_summary.pending_review }}</span>
+            <!-- ML Status Card -->
+            <div class="sidebar-card">
+                <h3 class="sidebar-card-title">ML Forecasting</h3>
+                <div class="sidebar-card-content">
+                    <div class="sidebar-row">
+                        <span class="label">Last Trained</span>
+                        <span class="value text-xs">
+                            {% if last_ml_train.last_trained %}
+                            {{ last_ml_train.last_trained[:10] }}
                             {% else %}
-                            <span class="badge badge-green">0</span>
+                            Not yet
                             {% endif %}
-                        </div>
+                        </span>
+                    </div>
+                    <div class="sidebar-row">
+                        <span class="label">Models</span>
+                        <span class="value">{{ last_ml_train.models_count }}</span>
                     </div>
                 </div>
+            </div>
 
-                <!-- ML Status -->
-                <div class="summary-section border-b pb-4">
-                    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">ML Forecasting</h3>
-                    <div class="space-y-2 text-sm">
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Last Trained</span>
-                            <span class="text-xs text-gray-700">
-                                {% if last_ml_train.last_trained %}
-                                {{ last_ml_train.last_trained[:10] }}
-                                {% else %}
-                                Not yet
-                                {% endif %}
-                            </span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">Models</span>
-                            <span class="font-medium">{{ last_ml_train.models_count }}</span>
-                        </div>
-                    </div>
+            <!-- Schedule Forecast Card -->
+            <div class="sidebar-card" id="schedule-forecast-section">
+                <h3 class="sidebar-card-title flex items-center justify-between">
+                    <span>Schedule Forecast</span>
+                    <span id="schedule-status-badge" class="text-xs px-1.5 py-0.5 rounded hidden"></span>
+                </h3>
+                <div id="schedule-forecast-loading" class="text-center py-3 text-gray-400 text-sm">
+                    <svg class="animate-spin h-4 w-4 inline mr-2" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Loading...
                 </div>
-
-                <!-- Schedule Forecast -->
-                <div class="summary-section" id="schedule-forecast-section">
-                    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center">
-                        Schedule Forecast
-                        <span id="schedule-status-badge" class="ml-2 text-xs px-1.5 py-0.5 rounded hidden"></span>
-                    </h3>
-                    <div id="schedule-forecast-loading" class="text-center py-3 text-gray-400 text-sm">
-                        <svg class="animate-spin h-4 w-4 inline mr-2" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Loading...
-                    </div>
-                    <div id="schedule-forecast-content" class="hidden">
-                        <!-- Project Progress -->
-                        <div class="mb-3">
-                            <div class="flex justify-between items-center mb-1">
-                                <span class="text-xs text-gray-500">Project Progress</span>
-                                <span id="project-pct" class="text-xs font-semibold">0%</span>
-                            </div>
-                            <div class="w-full bg-gray-200 rounded-full h-2">
-                                <div id="project-progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
-                            </div>
-                            <div class="text-xs text-gray-500 mt-1">
-                                Phase: <span id="current-phase" class="font-medium">-</span>
-                            </div>
+                <div id="schedule-forecast-content" class="hidden sidebar-card-content">
+                    <!-- Project Progress -->
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs text-gray-500">Project Progress</span>
+                            <span id="project-pct" class="text-xs font-semibold">0%</span>
                         </div>
-
-                        <!-- Schedule Variance Summary -->
-                        <div class="p-2 rounded-md mb-3" id="variance-summary-box">
-                            <div class="flex justify-between items-center">
-                                <span class="text-xs text-gray-600">Schedule Variance</span>
-                                <span id="total-variance" class="text-sm font-semibold">-</span>
-                            </div>
-                            <div class="text-xs text-gray-500 mt-1">
-                                Expected: <span id="total-expected">-</span> | Actual: <span id="total-spent">-</span>
-                            </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div id="project-progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
                         </div>
-
-                        <!-- Top Variances -->
-                        <div class="space-y-2" id="top-variances">
-                            <!-- Populated by JS -->
+                        <div class="text-xs text-gray-500 mt-1">
+                            Phase: <span id="current-phase" class="font-medium">-</span>
                         </div>
+                    </div>
 
-                        <a href="#" id="view-all-forecasts" class="block text-center text-blue-600 hover:underline text-xs mt-3 hidden">
-                            View all forecasts →
-                        </a>
+                    <!-- Schedule Variance Summary -->
+                    <div class="p-2 rounded-md" id="variance-summary-box">
+                        <div class="sidebar-row">
+                            <span class="label text-xs">Variance</span>
+                            <span id="total-variance" class="value text-sm">-</span>
+                        </div>
+                        <div class="text-xs text-gray-500 mt-1">
+                            Expected: <span id="total-expected">-</span> | Actual: <span id="total-spent">-</span>
+                        </div>
                     </div>
-                    <div id="schedule-forecast-error" class="hidden text-center py-3 text-red-500 text-xs">
-                        <span id="forecast-error-msg">Error loading forecasts</span>
+
+                    <!-- Top Variances -->
+                    <div class="space-y-2" id="top-variances">
+                        <!-- Populated by JS -->
                     </div>
+
+                    <a href="/forecast" id="view-all-forecasts" class="block text-center text-blue-600 hover:underline text-xs mt-2 hidden">
+                        View all forecasts →
+                    </a>
+                </div>
+                <div id="schedule-forecast-error" class="hidden text-center py-3 text-red-500 text-xs">
+                    <span id="forecast-error-msg">Error loading forecasts</span>
                 </div>
             </div>
         </div>
