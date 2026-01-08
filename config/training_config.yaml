@@ -1,0 +1,159 @@
+# Training Configuration for GMP Cost Forecasting
+# This file configures model architecture, training parameters, and data processing
+
+data:
+  # Historical data parameters
+  lookback_months: 12  # Number of months of history for each prediction
+  forecast_horizon_months: 6  # Number of months to forecast ahead
+  train_test_split: 0.8  # Fraction of data for training
+  validation_split: 0.15  # Fraction of training data for validation
+
+  # Sub-job sequencing constraints (for multi-building projects)
+  sub_job_sequencing:
+    pattern: "east_first"  # Sequential start pattern
+    design_overlap_allowed: true  # Design phases can fully overlap
+    construction_overlap_days:
+      min: 20  # Minimum construction overlap
+      max: 40  # Maximum construction overlap
+      target: 30  # Target ~1 month overlap
+
+features:
+  # Building parameters for forecasting
+  building_params:
+    - name: "sqft"
+      type: "continuous"
+      normalization: "log_transform"
+      importance_prior: "high"
+      description: "Total building square footage"
+
+    - name: "stories"
+      type: "discrete"
+      normalization: "standard"
+      importance_prior: "medium"
+      description: "Number of floors"
+
+    - name: "has_green_roof"
+      type: "binary"
+      encoding: "onehot"
+      importance_prior: "medium"
+      description: "Green roof presence (adds 15-25% to roofing costs)"
+
+    - name: "rooftop_units_qty"
+      type: "count"
+      normalization: "log1p"
+      importance_prior: "high"
+      description: "Number of rooftop HVAC units"
+
+    - name: "fall_anchor_count"
+      type: "count"
+      normalization: "log1p"
+      importance_prior: "medium"
+      description: "Number of fall protection anchors (facade complexity indicator)"
+
+  # Derived features (computed automatically)
+  derived:
+    - name: "sqft_per_story"
+      formula: "sqft / stories"
+      description: "Average floor plate size"
+
+    - name: "complexity_score"
+      formula: |
+        0.3 * has_green_roof +
+        0.4 * min(rooftop_units_qty / 10, 1) +
+        0.3 * min(fall_anchor_count / 50, 1)
+      description: "Overall building complexity (0-1 scale)"
+
+model:
+  # Model selection
+  architecture: "lstm"  # Options: lstm, transformer
+
+  # LSTM parameters (used if architecture: lstm)
+  lstm:
+    units: 64  # LSTM hidden units
+    layers: 2  # Number of LSTM layers
+    bidirectional: true  # Use bidirectional LSTM
+    dropout: 0.2  # Dropout rate
+    recurrent_dropout: 0.1  # Recurrent dropout
+    num_mixture_components: 3  # GMM output components
+
+  # Transformer parameters (used if architecture: transformer)
+  transformer:
+    d_model: 64  # Model dimension
+    num_heads: 4  # Number of attention heads
+    encoder_layers: 2  # Number of encoder blocks
+    ff_dim: 128  # Feed-forward dimension
+    dropout: 0.1  # Dropout rate
+
+  # Probabilistic output configuration
+  output:
+    type: "gaussian_mixture"  # For LSTM
+    num_components: 3  # Number of mixture components
+    quantiles: [0.1, 0.5, 0.9]  # For transformer quantile outputs
+
+training:
+  # Training hyperparameters
+  epochs: 100  # Maximum training epochs
+  batch_size: 32  # Batch size
+  learning_rate: 0.001  # Initial learning rate
+
+  # Learning rate scheduler
+  lr_scheduler:
+    type: "cosine_annealing"
+    min_lr: 0.00001
+    warmup_epochs: 5
+
+  # Early stopping
+  early_stopping:
+    patience: 15  # Epochs without improvement before stopping
+    min_delta: 0.0001  # Minimum change to qualify as improvement
+    monitor: "val_loss"  # Metric to monitor
+
+  # Regularization
+  regularization:
+    l1: 0.0  # L1 regularization
+    l2: 0.0001  # L2 regularization
+    dropout: 0.2  # Dropout rate
+
+  # Data augmentation for time series
+  augmentation:
+    enabled: true
+    techniques:
+      - name: "jitter"
+        magnitude: 0.01  # Random noise magnitude
+      - name: "scaling"
+        range: [0.9, 1.1]  # Scale factor range
+      - name: "time_warp"
+        sigma: 0.1  # Warping sigma
+
+evaluation:
+  # Evaluation metrics
+  metrics:
+    - "mse"  # Mean squared error
+    - "mae"  # Mean absolute error
+    - "mape"  # Mean absolute percentage error
+    - "pinball_loss"  # Quantile loss
+    - "coverage_probability"  # Prediction interval coverage
+
+  # Cross-validation settings
+  cross_validation:
+    type: "time_series_split"  # Preserves temporal order
+    n_splits: 5  # Number of folds
+    gap: 1  # Gap between train and test (months)
+
+mlops:
+  # Experiment tracking
+  experiment_tracking:
+    backend: "mlflow"  # Tracking backend
+    experiment_name: "gmp_cost_forecasting"
+    tracking_uri: null  # Set to MLflow server URI if using
+
+  # Model registry
+  model_registry:
+    path: "./models"  # Local model storage
+    versioning: true  # Enable version tracking
+
+  # Logging
+  logging:
+    level: "INFO"
+    tensorboard: true  # Enable TensorBoard logging
+    log_dir: "./logs"  # TensorBoard log directory

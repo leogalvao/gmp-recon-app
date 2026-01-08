@@ -11,12 +11,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from datetime import datetime
 from typing import Dict, Optional, List
 import json
+import logging
 import pandas as pd
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Request, Depends, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel as PydanticBaseModel
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.background import BackgroundScheduler
 import io
@@ -3581,6 +3585,140 @@ async def get_integration_settings(db: Session = Depends(get_db)):
             'mapped': mapped_activities,
             'unmapped': schedule_count - mapped_activities
         }
+    }
+
+
+# =============================================================================
+# ML-Based Cost Forecasting API
+# =============================================================================
+
+# Global pipeline instance (lazy loaded)
+_ml_pipeline = None
+
+def get_ml_pipeline():
+    """Get or initialize the ML training pipeline."""
+    global _ml_pipeline
+    if _ml_pipeline is None:
+        try:
+            from app.infrastructure.ml.training_pipeline import TrainingPipeline
+            _ml_pipeline = TrainingPipeline()
+            # Try to load pre-trained model
+            model_path = Path("models/production_model.keras")
+            if model_path.exists():
+                _ml_pipeline.load(str(model_path))
+        except Exception as e:
+            logger.warning(f"Could not initialize ML pipeline: {e}")
+    return _ml_pipeline
+
+
+class BuildingParamsRequest(PydanticBaseModel):
+    """Request model for building parameters."""
+    sqft: float
+    stories: int
+    has_green_roof: bool = False
+    rooftop_units_qty: int = 0
+    fall_anchor_count: int = 0
+
+
+class CostHistoryRequest(PydanticBaseModel):
+    """Request model for cost history."""
+    monthly_costs: List[float]
+
+
+class ForecastRequest(PydanticBaseModel):
+    """Request model for forecast generation."""
+    building_params: BuildingParamsRequest
+    cost_history: CostHistoryRequest
+    confidence_level: float = 0.80
+
+
+class ForecastResponse(PydanticBaseModel):
+    """Response model for forecast results."""
+    point_estimate: float
+    lower_bound: float
+    upper_bound: float
+    confidence_level: float
+    mean: float
+    std: float
+    uncertainty_range: float
+
+
+@app.post("/api/ml/forecast", response_model=ForecastResponse)
+async def generate_ml_forecast(request: ForecastRequest):
+    """
+    Generate probabilistic cost forecast using TensorFlow model.
+
+    Uses building parameters and historical costs to predict future costs
+    with uncertainty quantification via Gaussian Mixture Model.
+    """
+    pipeline = get_ml_pipeline()
+
+    if pipeline is None or not pipeline.model.is_trained:
+        raise HTTPException(
+            status_code=503,
+            detail="ML model not available. Train the model first."
+        )
+
+    try:
+        from app.forecasting.models.base_model import BuildingFeatures
+
+        features = BuildingFeatures(
+            sqft=request.building_params.sqft,
+            stories=request.building_params.stories,
+            has_green_roof=request.building_params.has_green_roof,
+            rooftop_units_qty=request.building_params.rooftop_units_qty,
+            fall_anchor_count=request.building_params.fall_anchor_count,
+        )
+
+        cost_history = np.array(request.cost_history.monthly_costs)
+
+        result = pipeline.predict(
+            features=features,
+            cost_history=cost_history,
+            confidence_level=request.confidence_level
+        )
+
+        return ForecastResponse(
+            point_estimate=result.point_estimate,
+            lower_bound=result.lower_bound,
+            upper_bound=result.upper_bound,
+            confidence_level=result.confidence_level,
+            mean=result.mean,
+            std=result.std,
+            uncertainty_range=result.upper_bound - result.lower_bound,
+        )
+    except Exception as e:
+        logger.error(f"Forecast error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ml/model/info")
+async def get_ml_model_info():
+    """Get information about the current ML model."""
+    pipeline = get_ml_pipeline()
+
+    if pipeline is None:
+        return {
+            "status": "not_initialized",
+            "model_loaded": False,
+        }
+
+    return {
+        "status": "ready" if pipeline.model.is_trained else "not_trained",
+        "model_loaded": pipeline.model.is_trained,
+        "info": pipeline.get_model_info() if pipeline.model else None,
+    }
+
+
+@app.get("/api/ml/health")
+async def ml_health_check():
+    """Health check for ML subsystem."""
+    pipeline = get_ml_pipeline()
+
+    return {
+        "status": "healthy",
+        "tensorflow_available": True,
+        "model_loaded": pipeline is not None and pipeline.model.is_trained,
     }
 
 
