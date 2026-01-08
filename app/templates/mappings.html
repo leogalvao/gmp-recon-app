@@ -120,53 +120,22 @@
         </div>
 
         <!-- Quick Stats -->
-        <div class="space-y-3">
-            <!-- Primary Progress Card -->
-            <div class="bg-white border border-gray-200 rounded-lg p-4">
-                <div class="flex items-baseline gap-2 mb-2">
-                    <span class="text-2xl font-bold tabular-nums" id="budgetStatMapped">-</span>
-                    <span class="text-gray-500">/ <span id="budgetStatTotal">-</span> Mapped</span>
-                </div>
-                <div class="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <div id="budgetMappingProgress" class="h-full bg-teal-500 rounded-full transition-all duration-500" style="width: 0%"></div>
-                </div>
-                <p class="mt-1 text-sm text-gray-600">
-                    <span id="budgetMappingPercent">0</span>% complete
-                </p>
+        <div class="grid grid-cols-4 gap-4 text-center">
+            <div class="bg-blue-50 rounded-lg p-3 cursor-pointer hover:bg-blue-100 transition-colors" onclick="setBudgetStatusFilter('all')">
+                <div class="text-2xl font-bold text-blue-600" id="budgetStatTotal">-</div>
+                <div class="text-sm text-blue-700">Total Budget Codes</div>
             </div>
-
-            <!-- Confidence Breakdown -->
-            <div class="grid grid-cols-4 gap-3">
-                <div class="bg-green-50 border border-green-200 rounded-lg p-3 cursor-pointer hover:bg-green-100 transition-colors" onclick="setBudgetStatusFilter('mapped')">
-                    <div class="text-xl font-bold tabular-nums text-green-700" id="budgetStatHighConf">0</div>
-                    <div class="text-xs font-medium text-green-700">🟢 High Conf.</div>
-                    <div class="text-xs text-green-600 opacity-75">≥85%</div>
-                </div>
-                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="setBudgetStatusFilter('mapped')">
-                    <div class="text-xl font-bold tabular-nums text-yellow-700" id="budgetStatMedConf">0</div>
-                    <div class="text-xs font-medium text-yellow-700">🟡 Medium</div>
-                    <div class="text-xs text-yellow-600 opacity-75">60-84%</div>
-                </div>
-                <div class="bg-red-50 border border-red-200 rounded-lg p-3 cursor-pointer hover:bg-red-100 transition-colors" onclick="setBudgetStatusFilter('unmapped')">
-                    <div class="text-xl font-bold tabular-nums text-red-700" id="budgetStatNeedsReview">0</div>
-                    <div class="text-xs font-medium text-red-700">🔴 Needs Review</div>
-                    <div class="text-xs text-red-600 opacity-75">&lt;60%</div>
-                </div>
-                <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-100 transition-colors" onclick="setBudgetStatusFilter('unmapped')">
-                    <div class="text-xl font-bold tabular-nums text-gray-700" id="budgetStatUnmapped">-</div>
-                    <div class="text-xs font-medium text-gray-700">Unmapped</div>
-                    <div class="text-xs text-gray-500 opacity-75">Needs Mapping</div>
-                </div>
+            <div class="bg-green-50 rounded-lg p-3 cursor-pointer hover:bg-green-100 transition-colors" onclick="setBudgetStatusFilter('mapped')">
+                <div class="text-2xl font-bold text-green-600" id="budgetStatMapped">-</div>
+                <div class="text-sm text-green-700">Mapped</div>
             </div>
-
-            <!-- Warning Banner (shown when confidence = 0 but items are mapped) -->
-            <div id="budgetConfidenceWarning" class="hidden flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                <svg class="w-5 h-5 text-amber-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-                </svg>
-                <span class="text-sm text-amber-800">
-                    <span id="budgetPendingScoringCount">0</span> mapped items are pending confidence scoring
-                </span>
+            <div class="bg-yellow-50 rounded-lg p-3 cursor-pointer hover:bg-yellow-100 transition-colors" onclick="setBudgetStatusFilter('unmapped')">
+                <div class="text-2xl font-bold text-yellow-600" id="budgetStatSuggestions">-</div>
+                <div class="text-sm text-yellow-700">Have Suggestions</div>
+            </div>
+            <div class="bg-red-50 rounded-lg p-3 cursor-pointer hover:bg-red-100 transition-colors" onclick="setBudgetStatusFilter('unmapped')">
+                <div class="text-2xl font-bold text-red-600" id="budgetStatUnmapped">-</div>
+                <div class="text-sm text-red-700">Needs Mapping</div>
             </div>
         </div>
 
@@ -3221,57 +3190,18 @@ async function loadBudgetTable() {
 // Update stats display
 function updateBudgetStats(data) {
     const stats = data.stats || {};
-    const total = stats.total || 0;
-    const mapped = stats.mapped || 0;
-    const unmapped = stats.unmapped || 0;
 
-    // Primary progress card
-    const totalEl = document.getElementById('budgetStatTotal');
-    const mappedEl = document.getElementById('budgetStatMapped');
-    const progressBar = document.getElementById('budgetMappingProgress');
-    const percentEl = document.getElementById('budgetMappingPercent');
-
-    if (totalEl) totalEl.textContent = total.toLocaleString();
-    if (mappedEl) mappedEl.textContent = mapped.toLocaleString();
-
-    const mappingPercent = total > 0 ? Math.round((mapped / total) * 100) : 0;
-    if (progressBar) progressBar.style.width = `${mappingPercent}%`;
-    if (percentEl) percentEl.textContent = mappingPercent;
-
-    // Confidence breakdown (using available stats or defaulting to 0)
-    const highConf = stats.high_confidence || 0;
-    const medConf = stats.medium_confidence || 0;
-    const needsReview = stats.needs_review || stats.with_suggestions || 0;
-
-    const highConfEl = document.getElementById('budgetStatHighConf');
-    const medConfEl = document.getElementById('budgetStatMedConf');
-    const needsReviewEl = document.getElementById('budgetStatNeedsReview');
-    const unmappedEl = document.getElementById('budgetStatUnmapped');
-
-    if (highConfEl) highConfEl.textContent = highConf.toLocaleString();
-    if (medConfEl) medConfEl.textContent = medConf.toLocaleString();
-    if (needsReviewEl) needsReviewEl.textContent = needsReview.toLocaleString();
-    if (unmappedEl) unmappedEl.textContent = unmapped.toLocaleString();
-
-    // Show warning if mapped items exist but confidence scores are all zero
-    const warningEl = document.getElementById('budgetConfidenceWarning');
-    const pendingCountEl = document.getElementById('budgetPendingScoringCount');
-    const allConfZero = (highConf === 0 && medConf === 0 && needsReview === 0);
-
-    if (warningEl) {
-        if (allConfZero && mapped > 0) {
-            if (pendingCountEl) pendingCountEl.textContent = mapped.toLocaleString();
-            warningEl.classList.remove('hidden');
-        } else {
-            warningEl.classList.add('hidden');
-        }
-    }
+    // Quick stats cards
+    document.getElementById('budgetStatTotal')?.textContent && (document.getElementById('budgetStatTotal').textContent = stats.total || 0);
+    document.getElementById('budgetStatMapped')?.textContent && (document.getElementById('budgetStatMapped').textContent = stats.mapped || 0);
+    document.getElementById('budgetStatSuggestions')?.textContent && (document.getElementById('budgetStatSuggestions').textContent = stats.with_suggestions || 0);
+    document.getElementById('budgetStatUnmapped')?.textContent && (document.getElementById('budgetStatUnmapped').textContent = stats.unmapped || 0);
 
     // Segmented control counts
     const countUnmapped = document.getElementById('budgetCountUnmapped');
     const countMapped = document.getElementById('budgetCountMapped');
-    if (countUnmapped) countUnmapped.textContent = unmapped > 0 ? `(${unmapped})` : '';
-    if (countMapped) countMapped.textContent = mapped > 0 ? `(${mapped})` : '';
+    if (countUnmapped) countUnmapped.textContent = stats.unmapped > 0 ? `(${stats.unmapped})` : '';
+    if (countMapped) countMapped.textContent = stats.mapped > 0 ? `(${stats.mapped})` : '';
 
     // Bulk accept button visibility
     const bulkContainer = document.getElementById('budgetBulkActionsContainer');
