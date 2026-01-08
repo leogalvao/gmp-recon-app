@@ -518,10 +518,34 @@ async def forecast_project_page(
     manager = ForecastManager(db)
     rollup = compute_project_rollup(db)
 
+    # Get schedule variances for all divisions
+    schedule_variances = get_schedule_variances()
+
     # Filter by selected divisions if specified
     division_forecasts = rollup.get('by_division', [])
     if selected_divisions:
         division_forecasts = [d for d in division_forecasts if d['gmp_division'] in selected_divisions]
+
+    # Add schedule variance to each division and calculate totals
+    total_schedule_expected = 0
+    total_schedule_spent = 0
+    total_schedule_variance = 0
+    for div in division_forecasts:
+        div_name = div.get('gmp_division', '')
+        div_sched = schedule_variances.get(div_name, {})
+        div['schedule_expected'] = div_sched.get('expected', 0)
+        div['schedule_spent'] = div_sched.get('spent', 0)
+        div['schedule_variance'] = div_sched.get('variance', 0)
+        div['schedule_variance_pct'] = div_sched.get('variance_pct', 0)
+        div['schedule_variance_status'] = div_sched.get('status', 'on_track')
+        # Accumulate totals
+        total_schedule_expected += div['schedule_expected']
+        total_schedule_spent += div['schedule_spent']
+        total_schedule_variance += div['schedule_variance']
+
+    # Calculate total schedule variance percent
+    total_schedule_variance_pct = round(total_schedule_variance / total_schedule_expected * 100, 1) if total_schedule_expected > 0 else 0
+    total_schedule_status = 'over' if total_schedule_variance > 0 else 'under' if total_schedule_variance < 0 else 'on_track'
 
     # Calculate filtered totals
     if selected_divisions and division_forecasts:
@@ -564,7 +588,13 @@ async def forecast_project_page(
         'trigger': 'manual',
         'snapshot_date': None,
         'division_count': len(division_forecasts),
-        'divisions': division_forecasts
+        'divisions': division_forecasts,
+        # Schedule variance totals
+        'schedule_expected': total_schedule_expected,
+        'schedule_spent': total_schedule_spent,
+        'schedule_variance': total_schedule_variance,
+        'schedule_variance_pct': total_schedule_variance_pct,
+        'schedule_variance_status': total_schedule_status
     }
 
     # Config for project view
@@ -624,6 +654,10 @@ async def forecast_page(
     config = manager.get_or_create_config(gmp_division)
     snapshot = manager.get_current_snapshot(gmp_division)
 
+    # Get schedule variance for this division
+    schedule_variances = get_schedule_variances()
+    div_schedule_var = schedule_variances.get(gmp_division, {})
+
     # Build forecast dict
     if snapshot:
         forecast = {
@@ -651,10 +685,24 @@ async def forecast_page(
             'confidence_score': snapshot.confidence_score,
             'confidence_band': snapshot.confidence_band,
             'explanation': snapshot.explanation,
-            'trigger': snapshot.trigger
+            'trigger': snapshot.trigger,
+            # Schedule variance fields
+            'schedule_expected': div_schedule_var.get('expected', 0),
+            'schedule_spent': div_schedule_var.get('spent', 0),
+            'schedule_variance': div_schedule_var.get('variance', 0),
+            'schedule_variance_pct': div_schedule_var.get('variance_pct', 0),
+            'schedule_variance_status': div_schedule_var.get('status', 'on_track')
         }
     else:
-        forecast = {'has_forecast': False}
+        forecast = {
+            'has_forecast': False,
+            # Still include schedule variance even without forecast
+            'schedule_expected': div_schedule_var.get('expected', 0),
+            'schedule_spent': div_schedule_var.get('spent', 0),
+            'schedule_variance': div_schedule_var.get('variance', 0),
+            'schedule_variance_pct': div_schedule_var.get('variance_pct', 0),
+            'schedule_variance_status': div_schedule_var.get('status', 'on_track')
+        }
 
     # Build config dict
     config_dict = {
@@ -713,6 +761,7 @@ async def forecast_page(
         "periods": periods_data,
         "side_filter": side_filter,
         "available_sides": available_sides,
+        "is_project_view": False,
         "active_page": "gmp"
     })
 

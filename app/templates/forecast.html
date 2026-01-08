@@ -453,6 +453,15 @@
                     </div>
                     <div class="metric-sub">Cost Performance Index</div>
                 </div>
+                {% if forecast.schedule_expected and forecast.schedule_expected > 0 %}
+                <div class="metric-card">
+                    <div class="metric-label">Schedule Var</div>
+                    <div class="metric-value {% if forecast.schedule_variance_status == 'over' %}overrun{% elif forecast.schedule_variance_status == 'under' %}surplus{% else %}neutral{% endif %}">
+                        {% if forecast.schedule_variance >= 0 %}+{% endif %}{{ '{:.1f}'.format(forecast.schedule_variance_pct) }}%
+                    </div>
+                    <div class="metric-sub">${{ '{:,.0f}'.format(forecast.schedule_variance) }} vs schedule</div>
+                </div>
+                {% endif %}
             </div>
             {% else %}
             <div class="alert alert-info">
@@ -477,6 +486,7 @@
                             <th class="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase">AC</th>
                             <th class="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase">EAC</th>
                             <th class="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase">Variance</th>
+                            <th class="text-right py-3 px-4 text-xs font-medium text-gray-500 uppercase">Sched Var</th>
                             <th class="text-center py-3 px-4 text-xs font-medium text-gray-500 uppercase">CPI</th>
                             <th class="text-center py-3 px-4 text-xs font-medium text-gray-500 uppercase">Method</th>
                             <th class="text-center py-3 px-4 text-xs font-medium text-gray-500 uppercase">Confidence</th>
@@ -492,6 +502,11 @@
                             <td class="py-3 px-4 text-right text-gray-700">{{ div.eac_display }}</td>
                             <td class="py-3 px-4 text-right {% if div.var_cents > 0 %}text-green-600{% elif div.var_cents < 0 %}text-red-600{% else %}text-gray-500{% endif %}">
                                 {{ div.var_display }}
+                            </td>
+                            <td class="py-3 px-4 text-right {% if div.schedule_variance_status == 'over' %}text-red-600{% elif div.schedule_variance_status == 'under' %}text-green-600{% else %}text-gray-500{% endif %}">
+                                {% if div.schedule_expected and div.schedule_expected > 0 %}
+                                {% if div.schedule_variance >= 0 %}+{% endif %}{{ '{:.1f}'.format(div.schedule_variance_pct) }}%
+                                {% else %}-{% endif %}
                             </td>
                             <td class="py-3 px-4 text-center {% if div.cpi and div.cpi >= 1 %}text-green-600{% elif div.cpi %}text-red-600{% endif %}">
                                 {{ div.cpi if div.cpi else '-' }}
@@ -521,6 +536,11 @@
                             <td class="py-3 px-4 text-right text-gray-900">{{ forecast.eac_display }}</td>
                             <td class="py-3 px-4 text-right {% if forecast.var_cents > 0 %}text-green-600{% elif forecast.var_cents < 0 %}text-red-600{% else %}text-gray-500{% endif %}">
                                 {{ forecast.var_display }}
+                            </td>
+                            <td class="py-3 px-4 text-right {% if forecast.schedule_variance_status == 'over' %}text-red-600{% elif forecast.schedule_variance_status == 'under' %}text-green-600{% else %}text-gray-500{% endif %}">
+                                {% if forecast.schedule_expected and forecast.schedule_expected > 0 %}
+                                {% if forecast.schedule_variance >= 0 %}+{% endif %}{{ '{:.1f}'.format(forecast.schedule_variance_pct) }}%
+                                {% else %}-{% endif %}
                             </td>
                             <td class="py-3 px-4 text-center">-</td>
                             <td class="py-3 px-4 text-center">-</td>
