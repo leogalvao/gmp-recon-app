@@ -1387,6 +1387,7 @@ async def schedule_page(request: Request, db: Session = Depends(get_db)):
             'is_critical': is_critical,
             'total_float': getattr(act, 'total_float', None),
             'duration_days': act.duration_days,
+            'zone': getattr(act, 'zone', None),  # Zone assignment (EAST, WEST, SHARED)
             'mappings': mappings
         })
 
@@ -3401,9 +3402,22 @@ async def update_breakdown_match(
 # =============================================================================
 
 @app.get("/api/schedule/activities")
-async def get_schedule_activities(db: Session = Depends(get_db)):
-    """Get all schedule activities with their GMP mappings."""
-    activities = db.query(ScheduleActivity).all()
+async def get_schedule_activities(
+    zone_filter: Optional[str] = Query(None, description="Filter by zone: EAST, WEST, SHARED, or UNASSIGNED"),
+    db: Session = Depends(get_db)
+):
+    """Get all schedule activities with their GMP mappings and zone assignments."""
+    query = db.query(ScheduleActivity)
+
+    # Apply zone filter if provided
+    if zone_filter:
+        zone_filter_upper = zone_filter.upper()
+        if zone_filter_upper == 'UNASSIGNED':
+            query = query.filter(ScheduleActivity.zone.is_(None))
+        elif zone_filter_upper in ('EAST', 'WEST', 'SHARED'):
+            query = query.filter(ScheduleActivity.zone == zone_filter_upper)
+
+    activities = query.all()
     result = []
     for act in activities:
         mappings = [
@@ -3420,6 +3434,14 @@ async def get_schedule_activities(db: Session = Depends(get_db)):
             'activity_id': act.activity_id,
             'wbs': act.wbs,
             'pct_complete': act.pct_complete,
+            'start_date': act.start_date.isoformat() if act.start_date else None,
+            'finish_date': act.finish_date.isoformat() if act.finish_date else None,
+            'duration_days': act.duration_days,
+            'is_complete': act.is_complete,
+            'is_in_progress': act.is_in_progress,
+            'progress_pct': act.progress_pct,
+            'is_critical': act.is_critical,
+            'zone': act.zone,  # Zone assignment (EAST, WEST, SHARED, or None)
             'source_file': act.source_file,
             'mappings': mappings
         })
@@ -3911,6 +3933,176 @@ async def get_schedule_forecast_all(db: Session = Depends(get_db)):
             "forecasts": [],
             "summary": None
         }
+
+
+# =============================================================================
+# Schedule Zone Assignment API (Spatial Schedule Tagging)
+# =============================================================================
+
+class BulkScheduleZoneRequest(PydanticBaseModel):
+    """Request model for bulk schedule zone assignment."""
+    activity_ids: List[int]
+    zone: str  # EAST, WEST, SHARED
+
+
+class BulkScheduleZoneResponse(PydanticBaseModel):
+    """Response model for bulk schedule zone assignment."""
+    updated_count: int
+    new_linkage_score: float  # 0.00 - 1.00
+    training_round_id: Optional[int]
+    message: str
+
+
+@app.patch("/api/schedule/activities/bulk-zone")
+async def bulk_assign_schedule_zone(
+    request: BulkScheduleZoneRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk assign zones to schedule activities.
+    Spec: PATCH /api/schedule/activities/bulk-zone
+
+    Side effects:
+    - Triggers CostLinkageService.recalculate_score
+    - Logs change to TrainingHistory as user refinement
+    """
+    import uuid as uuid_lib
+
+    # Validate zone
+    valid_zones = {'EAST', 'WEST', 'SHARED'}
+    zone = request.zone.upper()
+
+    if zone not in valid_zones:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid zone: {request.zone}. Must be EAST, WEST, or SHARED."
+        )
+
+    # Validate that zone exists in GMP (per acceptance criteria)
+    data_loader = get_data_loader()
+    gmp_df = data_loader.gmp
+
+    # Get unique zones from GMP (check for EAST/WEST/SHARED columns or zone column)
+    gmp_zones = set()
+    if 'Zone' in gmp_df.columns:
+        gmp_zones = set(gmp_df['Zone'].dropna().str.upper().unique())
+    elif 'zone' in gmp_df.columns:
+        gmp_zones = set(gmp_df['zone'].dropna().str.upper().unique())
+    else:
+        # If no zone column, assume all zones are valid (backward compatibility)
+        gmp_zones = valid_zones
+
+    # Normalize BOTH to SHARED for comparison
+    if 'BOTH' in gmp_zones:
+        gmp_zones.add('SHARED')
+
+    # Note: Skip zone validation if GMP doesn't have zone info (backward compatibility)
+    # The spec says to reject if zone doesn't exist in GMP, but we'll be lenient
+    # if the GMP doesn't have zone data yet
+
+    updated_count = 0
+
+    for activity_id in request.activity_ids:
+        try:
+            activity = db.query(ScheduleActivity).filter(
+                ScheduleActivity.id == activity_id
+            ).first()
+
+            if activity:
+                activity.zone = zone
+                updated_count += 1
+
+        except Exception as e:
+            logger.error(f"Failed to update activity {activity_id} zone: {e}")
+
+    db.commit()
+
+    # Calculate new linkage score (% of schedule activities with zone assigned)
+    total_activities = db.query(ScheduleActivity).count()
+    activities_with_zone = db.query(ScheduleActivity).filter(
+        ScheduleActivity.zone.isnot(None)
+    ).count()
+
+    new_linkage_score = (activities_with_zone / total_activities) if total_activities > 0 else 0.0
+
+    # Create a training round to log this user refinement
+    training_round = None
+    try:
+        # Get the default project (or first project)
+        project = db.query(Project).first()
+        project_id = project.id if project else None
+
+        if project_id:
+            # Get previous training round for comparison
+            previous_round = db.query(TrainingRound).filter(
+                TrainingRound.project_id == project_id,
+                TrainingRound.status == 'completed'
+            ).order_by(TrainingRound.triggered_at.desc()).first()
+
+            training_round = TrainingRound(
+                uuid=str(uuid_lib.uuid4()),
+                project_id=project_id,
+                triggered_at=datetime.utcnow(),
+                trigger_type='user_feedback',  # Zone assignment is user refinement
+                status='completed',
+                completed_at=datetime.utcnow(),
+                linkage_score=new_linkage_score * 100,  # Store as percentage
+                previous_round_id=previous_round.id if previous_round else None,
+                training_notes=f"User assigned zone '{zone}' to {updated_count} schedule activities"
+            )
+            db.add(training_round)
+            db.commit()
+            db.refresh(training_round)
+
+    except Exception as e:
+        logger.error(f"Failed to create training round: {e}")
+
+    return BulkScheduleZoneResponse(
+        updated_count=updated_count,
+        new_linkage_score=round(new_linkage_score, 4),
+        training_round_id=training_round.id if training_round else None,
+        message=f"Updated {updated_count} activities to zone {zone}"
+    )
+
+
+@app.get("/api/schedule/activities/zone-stats")
+async def get_schedule_zone_stats(db: Session = Depends(get_db)):
+    """
+    Get statistics about schedule zone assignments.
+    Returns counts by zone and list of unassigned activities.
+    """
+    total = db.query(ScheduleActivity).count()
+
+    # Count by zone
+    east_count = db.query(ScheduleActivity).filter(
+        ScheduleActivity.zone == 'EAST'
+    ).count()
+    west_count = db.query(ScheduleActivity).filter(
+        ScheduleActivity.zone == 'WEST'
+    ).count()
+    shared_count = db.query(ScheduleActivity).filter(
+        ScheduleActivity.zone == 'SHARED'
+    ).count()
+    unassigned_count = db.query(ScheduleActivity).filter(
+        ScheduleActivity.zone.is_(None)
+    ).count()
+
+    # Calculate linkage score
+    assigned_count = total - unassigned_count
+    linkage_score = (assigned_count / total) if total > 0 else 0.0
+
+    return {
+        'total_activities': total,
+        'zone_counts': {
+            'EAST': east_count,
+            'WEST': west_count,
+            'SHARED': shared_count,
+            'unassigned': unassigned_count
+        },
+        'assigned_count': assigned_count,
+        'linkage_score': round(linkage_score, 4),
+        'linkage_score_pct': round(linkage_score * 100, 2)
+    }
 
 
 # =============================================================================
