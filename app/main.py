@@ -3603,7 +3603,7 @@ def get_ml_pipeline():
             from app.infrastructure.ml.training_pipeline import TrainingPipeline
             _ml_pipeline = TrainingPipeline()
             # Try to load pre-trained model
-            model_path = Path("models/production_model.keras")
+            model_path = Path("models/model.keras")
             if model_path.exists():
                 _ml_pipeline.load(str(model_path))
         except Exception as e:
