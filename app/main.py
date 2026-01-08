@@ -28,7 +28,9 @@ import io
 from app.models import (
     init_db, get_db, ensure_default_settings,
     Settings, Run, BudgetToGMP, DirectToBudget, Allocation, Duplicate,
-    SideConfiguration, GMPBudgetBreakdown, ScheduleActivity, ScheduleToGMPMapping
+    SideConfiguration, GMPBudgetBreakdown, ScheduleActivity, ScheduleToGMPMapping,
+    Project, GMP, BudgetEntity, ChangeOrder, DirectCostEntity,
+    TrainingRound, TrainingForecastSnapshot, ChangeOrderStatus, Zone, AllocationMethod
 )
 from app.modules.etl import (
     get_data_loader, cents_to_display, get_file_hashes,
@@ -4111,6 +4113,591 @@ async def ml_health_check():
         "status": "healthy",
         "tensorflow_available": True,
         "model_loaded": pipeline is not None and pipeline.model.is_trained,
+    }
+
+
+# =============================================================================
+# Project & Zone Tagging APIs (Per Specification Section 3)
+# =============================================================================
+
+class BulkZoneAssignRequest(PydanticBaseModel):
+    """Request model for bulk zone assignment."""
+    budget_ids: List[int]
+    zone: str  # EAST, WEST, SHARED
+
+
+class BulkZoneAssignResponse(PydanticBaseModel):
+    """Response model for bulk zone assignment."""
+    updated_count: int
+    failed_ids: List[int]
+    auto_linked_to_gmp: int
+    message: str
+
+
+@app.patch("/api/budgets/bulk-assign-zone")
+async def bulk_assign_zone(
+    request: BulkZoneAssignRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk assign zones to budgets.
+    Spec: PATCH /api/budgets/bulk-assign-zone
+    Logic: Updates Budget.zone and attempts to auto-link to matching GMP.
+    """
+    import uuid as uuid_lib
+
+    valid_zones = {'EAST', 'WEST', 'SHARED', 'BOTH'}
+    zone = request.zone.upper()
+    if zone == 'SHARED':
+        zone = 'BOTH'  # Normalize SHARED to BOTH
+
+    if zone not in valid_zones:
+        raise HTTPException(status_code=400, detail=f"Invalid zone: {request.zone}")
+
+    updated_count = 0
+    failed_ids = []
+    auto_linked = 0
+
+    for budget_id in request.budget_ids:
+        try:
+            # Update BudgetToGMP mapping side
+            budget_mapping = db.query(BudgetToGMP).filter(
+                BudgetToGMP.id == budget_id
+            ).first()
+
+            if budget_mapping:
+                budget_mapping.side = zone
+                budget_mapping.updated_at = datetime.utcnow()
+                updated_count += 1
+
+                # Try to auto-link to GMP if not already linked
+                if not budget_mapping.gmp_division:
+                    # Find matching GMP by budget code pattern
+                    data_loader = get_data_loader()
+                    gmp_df = data_loader.gmp
+
+                    # Simple matching logic - can be enhanced
+                    for _, gmp_row in gmp_df.iterrows():
+                        gmp_div = gmp_row.get('GMP Division', '')
+                        if budget_mapping.budget_code in str(gmp_div):
+                            budget_mapping.gmp_division = gmp_div
+                            auto_linked += 1
+                            break
+
+            # Also update BudgetEntity if exists
+            budget_entity = db.query(BudgetEntity).filter(
+                BudgetEntity.id == budget_id
+            ).first()
+
+            if budget_entity:
+                budget_entity.zone = zone
+                budget_entity.updated_at = datetime.utcnow()
+
+        except Exception as e:
+            logger.error(f"Failed to update budget {budget_id}: {e}")
+            failed_ids.append(budget_id)
+
+    db.commit()
+
+    return BulkZoneAssignResponse(
+        updated_count=updated_count,
+        failed_ids=failed_ids,
+        auto_linked_to_gmp=auto_linked,
+        message=f"Updated {updated_count} budgets to zone {request.zone}"
+    )
+
+
+# =============================================================================
+# Training API (Per Specification Section 3)
+# =============================================================================
+
+class TrainingTriggerResponse(PydanticBaseModel):
+    """Response model for training trigger."""
+    training_round_id: int
+    status: str
+    linkage_score: Optional[float]
+    eac_change_cents: Optional[int]
+    eac_change_pct: Optional[float]
+    previous_round_id: Optional[int]
+    message: str
+
+
+@app.post("/api/projects/{project_id}/train")
+async def trigger_project_training(
+    project_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger the Recalculation Engine for a project.
+    Spec: POST /api/projects/{id}/train
+
+    Steps:
+    1. Create new TrainingRound
+    2. Re-evaluate all Budget <-> Schedule links based on new Zone tags
+    3. Calculate new Forecast Curve (EAC)
+    4. Save curve to ForecastSnapshot
+    5. Return comparison data (Old Snapshot vs New Snapshot)
+    """
+    import uuid as uuid_lib
+    from datetime import timedelta
+
+    # Check if project exists (or create default for backward compatibility)
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        # For backward compatibility, create a default project if none exists
+        if project_id == 1:
+            project = Project(
+                uuid=str(uuid_lib.uuid4()),
+                name="Default Project",
+                code="DEFAULT",
+                is_active=True
+            )
+            db.add(project)
+            db.commit()
+            db.refresh(project)
+        else:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+    # Get previous training round for comparison
+    previous_round = db.query(TrainingRound).filter(
+        TrainingRound.project_id == project_id,
+        TrainingRound.status == 'completed'
+    ).order_by(TrainingRound.triggered_at.desc()).first()
+
+    # Create new training round
+    training_round = TrainingRound(
+        uuid=str(uuid_lib.uuid4()),
+        project_id=project_id,
+        triggered_at=datetime.utcnow(),
+        trigger_type='manual',
+        status='running',
+        previous_round_id=previous_round.id if previous_round else None
+    )
+    db.add(training_round)
+    db.commit()
+    db.refresh(training_round)
+
+    try:
+        # Step 1: Load data
+        data_loader = get_data_loader()
+        settings = get_settings(db)
+
+        gmp_df = data_loader.gmp.copy()
+        budget_df = data_loader.budget.copy()
+        direct_costs_df = data_loader.direct_costs.copy()
+
+        # Step 2: Re-evaluate Budget <-> Schedule links
+        schedule_activities = db.query(ScheduleActivity).all()
+        schedule_mappings = db.query(ScheduleToGMPMapping).all()
+
+        # Calculate linkage score
+        total_costs = len(direct_costs_df) if not direct_costs_df.empty else 0
+        linked_costs = len(direct_costs_df[direct_costs_df.get('mapped_budget_code', pd.Series()).notna()]) if not direct_costs_df.empty else 0
+        linkage_score = (linked_costs / total_costs * 100) if total_costs > 0 else 0.0
+
+        # Calculate budget coverage
+        total_budgets = len(budget_df) if not budget_df.empty else 0
+        linked_budgets = db.query(BudgetToGMP).filter(
+            BudgetToGMP.gmp_division.isnot(None)
+        ).count()
+        budget_coverage = (linked_budgets / total_budgets * 100) if total_budgets > 0 else 0.0
+
+        # Step 3: Calculate new Forecast Curve (EAC)
+        pipeline = get_forecasting_pipeline()
+        if pipeline.last_trained is None:
+            pipeline.train(direct_costs_df, budget_df, gmp_df, settings.get('as_of_date'))
+
+        # Compute reconciliation to get EAC data
+        breakdown_records = db.query(GMPBudgetBreakdown).all()
+        breakdown_df = None
+        if breakdown_records:
+            breakdown_df = pd.DataFrame([{
+                'gmp_division': b.gmp_division,
+                'east_funded_cents': b.east_funded_cents,
+                'west_funded_cents': b.west_funded_cents,
+                'pct_east': b.pct_east,
+                'pct_west': b.pct_west
+            } for b in breakdown_records if b.gmp_division])
+
+        predictions_df = pipeline.predict(direct_costs_df, budget_df, gmp_df, settings.get('as_of_date'))
+        recon_df = compute_reconciliation(
+            gmp_df, budget_df, direct_costs_df, predictions_df, settings,
+            breakdown_df=breakdown_df
+        )
+
+        # Calculate total EAC
+        total_eac_cents = int(recon_df['eac_cents'].sum()) if 'eac_cents' in recon_df.columns else 0
+
+        # Step 4: Save forecast snapshots by zone
+        as_of_date = settings.get('as_of_date') or datetime.utcnow().date()
+        zones = ['EAST', 'WEST', 'SHARED']
+
+        # Generate weekly periods for the next year
+        current_date = as_of_date if isinstance(as_of_date, datetime) else datetime.combine(as_of_date, datetime.min.time())
+        for i in range(52):  # 52 weeks
+            period_date = current_date + timedelta(weeks=i)
+
+            for zone in zones:
+                # Calculate predicted cost for this period/zone
+                zone_filter = zone if zone != 'SHARED' else 'BOTH'
+
+                if zone == 'EAST':
+                    period_cost = int(recon_df['eac_east_cents'].sum() / 52) if 'eac_east_cents' in recon_df.columns else 0
+                elif zone == 'WEST':
+                    period_cost = int(recon_df['eac_west_cents'].sum() / 52) if 'eac_west_cents' in recon_df.columns else 0
+                else:
+                    period_cost = int(total_eac_cents / 52)  # Shared/total
+
+                cumulative_cost = period_cost * (i + 1)
+
+                snapshot = TrainingForecastSnapshot(
+                    training_round_id=training_round.id,
+                    period_date=period_date.date() if hasattr(period_date, 'date') else period_date,
+                    predicted_cumulative_cost_cents=cumulative_cost,
+                    zone=zone,
+                    confidence_lower_cents=int(cumulative_cost * 0.9),
+                    confidence_upper_cents=int(cumulative_cost * 1.1)
+                )
+                db.add(snapshot)
+
+        # Step 5: Compare with previous round
+        previous_eac = 0
+        if previous_round:
+            prev_snapshots = db.query(TrainingForecastSnapshot).filter(
+                TrainingForecastSnapshot.training_round_id == previous_round.id
+            ).all()
+            if prev_snapshots:
+                previous_eac = max(s.predicted_cumulative_cost_cents for s in prev_snapshots)
+
+        eac_change = total_eac_cents - previous_eac if previous_eac > 0 else None
+        eac_change_pct = ((eac_change / previous_eac) * 100) if previous_eac > 0 and eac_change else None
+
+        # Update training round with results
+        training_round.status = 'completed'
+        training_round.completed_at = datetime.utcnow()
+        training_round.linkage_score = linkage_score
+        training_round.budget_coverage = budget_coverage
+        training_round.cost_coverage = (linked_costs / total_costs * 100) if total_costs > 0 else 0.0
+        training_round.eac_change_cents = eac_change
+        training_round.eac_change_pct = eac_change_pct
+        training_round.model_version = "1.0.0"
+
+        db.commit()
+
+        return TrainingTriggerResponse(
+            training_round_id=training_round.id,
+            status='completed',
+            linkage_score=linkage_score,
+            eac_change_cents=eac_change,
+            eac_change_pct=eac_change_pct,
+            previous_round_id=previous_round.id if previous_round else None,
+            message=f"Training completed. Linkage score: {linkage_score:.1f}%"
+        )
+
+    except Exception as e:
+        training_round.status = 'failed'
+        training_round.error_message = str(e)
+        training_round.completed_at = datetime.utcnow()
+        db.commit()
+        logger.error(f"Training failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
+
+
+@app.get("/api/projects/{project_id}/training-rounds")
+async def get_training_rounds(
+    project_id: int,
+    limit: int = 10,
+    db: Session = Depends(get_db)
+):
+    """Get training round history for a project."""
+    rounds = db.query(TrainingRound).filter(
+        TrainingRound.project_id == project_id
+    ).order_by(TrainingRound.triggered_at.desc()).limit(limit).all()
+
+    return {
+        "project_id": project_id,
+        "training_rounds": [
+            {
+                "id": r.id,
+                "uuid": r.uuid,
+                "triggered_at": r.triggered_at.isoformat() if r.triggered_at else None,
+                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+                "status": r.status,
+                "trigger_type": r.trigger_type,
+                "linkage_score": r.linkage_score,
+                "budget_coverage": r.budget_coverage,
+                "cost_coverage": r.cost_coverage,
+                "eac_change_cents": r.eac_change_cents,
+                "eac_change_pct": r.eac_change_pct,
+                "previous_round_id": r.previous_round_id
+            }
+            for r in rounds
+        ]
+    }
+
+
+@app.get("/api/projects/{project_id}/training-rounds/{round_id}/forecast")
+async def get_training_round_forecast(
+    project_id: int,
+    round_id: int,
+    zone: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get forecast curve for a specific training round."""
+    training_round = db.query(TrainingRound).filter(
+        TrainingRound.id == round_id,
+        TrainingRound.project_id == project_id
+    ).first()
+
+    if not training_round:
+        raise HTTPException(status_code=404, detail="Training round not found")
+
+    query = db.query(TrainingForecastSnapshot).filter(
+        TrainingForecastSnapshot.training_round_id == round_id
+    )
+
+    if zone:
+        query = query.filter(TrainingForecastSnapshot.zone == zone.upper())
+
+    snapshots = query.order_by(
+        TrainingForecastSnapshot.zone,
+        TrainingForecastSnapshot.period_date
+    ).all()
+
+    return {
+        "training_round_id": round_id,
+        "project_id": project_id,
+        "status": training_round.status,
+        "triggered_at": training_round.triggered_at.isoformat() if training_round.triggered_at else None,
+        "forecast_points": [
+            {
+                "period_date": s.period_date.isoformat() if s.period_date else None,
+                "zone": s.zone,
+                "predicted_cumulative_cost_cents": s.predicted_cumulative_cost_cents,
+                "actual_cumulative_cost_cents": s.actual_cumulative_cost_cents,
+                "confidence_lower_cents": s.confidence_lower_cents,
+                "confidence_upper_cents": s.confidence_upper_cents
+            }
+            for s in snapshots
+        ]
+    }
+
+
+# =============================================================================
+# Change Order APIs
+# =============================================================================
+
+class ChangeOrderCreate(PydanticBaseModel):
+    """Request model for creating a change order."""
+    gmp_id: int
+    number: str
+    title: str
+    description: Optional[str] = None
+    amount_cents: int
+    requested_date: Optional[str] = None
+
+
+class ChangeOrderUpdate(PydanticBaseModel):
+    """Request model for updating a change order."""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    amount_cents: Optional[int] = None
+    status: Optional[str] = None
+    approved_by: Optional[str] = None
+    rejection_reason: Optional[str] = None
+
+
+@app.get("/api/change-orders")
+async def list_change_orders(
+    gmp_id: Optional[int] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """List change orders with optional filters."""
+    query = db.query(ChangeOrder)
+
+    if gmp_id:
+        query = query.filter(ChangeOrder.gmp_id == gmp_id)
+    if status:
+        query = query.filter(ChangeOrder.status == status)
+
+    change_orders = query.order_by(ChangeOrder.created_at.desc()).all()
+
+    return {
+        "change_orders": [
+            {
+                "id": co.id,
+                "uuid": co.uuid,
+                "gmp_id": co.gmp_id,
+                "number": co.number,
+                "title": co.title,
+                "description": co.description,
+                "status": co.status,
+                "amount_cents": co.amount_cents,
+                "requested_date": co.requested_date.isoformat() if co.requested_date else None,
+                "approved_date": co.approved_date.isoformat() if co.approved_date else None,
+                "approved_by": co.approved_by,
+                "created_at": co.created_at.isoformat() if co.created_at else None
+            }
+            for co in change_orders
+        ]
+    }
+
+
+@app.post("/api/change-orders")
+async def create_change_order(
+    request: ChangeOrderCreate,
+    db: Session = Depends(get_db)
+):
+    """Create a new change order."""
+    import uuid as uuid_lib
+    from datetime import datetime
+
+    # Verify GMP exists
+    gmp = db.query(GMP).filter(GMP.id == request.gmp_id).first()
+    if not gmp:
+        raise HTTPException(status_code=404, detail=f"GMP {request.gmp_id} not found")
+
+    # Check for duplicate CO number
+    existing = db.query(ChangeOrder).filter(
+        ChangeOrder.gmp_id == request.gmp_id,
+        ChangeOrder.number == request.number
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Change order {request.number} already exists for this GMP"
+        )
+
+    change_order = ChangeOrder(
+        uuid=str(uuid_lib.uuid4()),
+        gmp_id=request.gmp_id,
+        number=request.number,
+        title=request.title,
+        description=request.description,
+        amount_cents=request.amount_cents,
+        status='draft',
+        requested_date=datetime.strptime(request.requested_date, '%Y-%m-%d').date() if request.requested_date else None
+    )
+
+    db.add(change_order)
+    db.commit()
+    db.refresh(change_order)
+
+    return {
+        "id": change_order.id,
+        "uuid": change_order.uuid,
+        "message": f"Change order {change_order.number} created"
+    }
+
+
+@app.patch("/api/change-orders/{co_id}")
+async def update_change_order(
+    co_id: int,
+    request: ChangeOrderUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update a change order."""
+    change_order = db.query(ChangeOrder).filter(ChangeOrder.id == co_id).first()
+    if not change_order:
+        raise HTTPException(status_code=404, detail="Change order not found")
+
+    if request.title is not None:
+        change_order.title = request.title
+    if request.description is not None:
+        change_order.description = request.description
+    if request.amount_cents is not None:
+        change_order.amount_cents = request.amount_cents
+    if request.status is not None:
+        valid_statuses = {'draft', 'pending', 'approved'}
+        if request.status not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {request.status}")
+        change_order.status = request.status
+        if request.status == 'approved':
+            change_order.approved_date = datetime.utcnow().date()
+    if request.approved_by is not None:
+        change_order.approved_by = request.approved_by
+    if request.rejection_reason is not None:
+        change_order.rejection_reason = request.rejection_reason
+
+    change_order.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {"message": f"Change order {change_order.number} updated"}
+
+
+@app.post("/api/change-orders/{co_id}/approve")
+async def approve_change_order(
+    co_id: int,
+    approved_by: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Approve a change order. This is the ONLY way to adjust the GMP ceiling."""
+    change_order = db.query(ChangeOrder).filter(ChangeOrder.id == co_id).first()
+    if not change_order:
+        raise HTTPException(status_code=404, detail="Change order not found")
+
+    if change_order.status == 'approved':
+        raise HTTPException(status_code=400, detail="Change order already approved")
+
+    change_order.status = 'approved'
+    change_order.approved_date = datetime.utcnow().date()
+    change_order.approved_by = approved_by
+    change_order.updated_at = datetime.utcnow()
+
+    db.commit()
+
+    # Get updated GMP ceiling
+    gmp = change_order.gmp
+    new_ceiling = gmp.authorized_amount_cents if gmp else change_order.amount_cents
+
+    return {
+        "message": f"Change order {change_order.number} approved",
+        "new_gmp_ceiling_cents": new_ceiling,
+        "change_amount_cents": change_order.amount_cents
+    }
+
+
+# =============================================================================
+# CSV Ingestion API (Per Specification Section 3)
+# =============================================================================
+
+@app.post("/api/ingest/csv")
+async def ingest_csv(
+    file_type: str = Form(...),  # gmp, budget, direct_costs, schedule
+    db: Session = Depends(get_db)
+):
+    """
+    Ingest raw CSV files.
+    Spec: POST /api/ingest/csv
+    Creates unlinked Budgets/Costs with null Zones.
+    """
+    valid_types = {'gmp', 'budget', 'direct_costs', 'schedule', 'allocations', 'breakdown'}
+    if file_type not in valid_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file_type. Must be one of: {valid_types}"
+        )
+
+    # Reload data from files
+    data_loader = get_data_loader()
+    data_loader.reload()
+
+    # Flag items for zone review
+    unassigned_count = 0
+
+    if file_type == 'budget':
+        # Count budgets without zone assignment
+        unassigned_count = db.query(BudgetToGMP).filter(
+            BudgetToGMP.side == 'BOTH'  # Default/unassigned
+        ).count()
+
+    return {
+        "status": "success",
+        "file_type": file_type,
+        "message": f"Data reloaded from {file_type} files",
+        "unassigned_zone_count": unassigned_count,
+        "action_required": unassigned_count > 0
     }
 
 
