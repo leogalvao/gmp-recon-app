@@ -602,7 +602,7 @@
                 </div>
 
                 <!-- ML Status -->
-                <div class="summary-section">
+                <div class="summary-section border-b pb-4">
                     <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">ML Forecasting</h3>
                     <div class="space-y-2 text-sm">
                         <div class="flex justify-between">
@@ -619,6 +619,59 @@
                             <span class="text-gray-600">Models</span>
                             <span class="font-medium">{{ last_ml_train.models_count }}</span>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Schedule Forecast -->
+                <div class="summary-section" id="schedule-forecast-section">
+                    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 flex items-center">
+                        Schedule Forecast
+                        <span id="schedule-status-badge" class="ml-2 text-xs px-1.5 py-0.5 rounded hidden"></span>
+                    </h3>
+                    <div id="schedule-forecast-loading" class="text-center py-3 text-gray-400 text-sm">
+                        <svg class="animate-spin h-4 w-4 inline mr-2" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Loading...
+                    </div>
+                    <div id="schedule-forecast-content" class="hidden">
+                        <!-- Project Progress -->
+                        <div class="mb-3">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-xs text-gray-500">Project Progress</span>
+                                <span id="project-pct" class="text-xs font-semibold">0%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-2">
+                                <div id="project-progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+                            </div>
+                            <div class="text-xs text-gray-500 mt-1">
+                                Phase: <span id="current-phase" class="font-medium">-</span>
+                            </div>
+                        </div>
+
+                        <!-- Schedule Variance Summary -->
+                        <div class="p-2 rounded-md mb-3" id="variance-summary-box">
+                            <div class="flex justify-between items-center">
+                                <span class="text-xs text-gray-600">Schedule Variance</span>
+                                <span id="total-variance" class="text-sm font-semibold">-</span>
+                            </div>
+                            <div class="text-xs text-gray-500 mt-1">
+                                Expected: <span id="total-expected">-</span> | Actual: <span id="total-spent">-</span>
+                            </div>
+                        </div>
+
+                        <!-- Top Variances -->
+                        <div class="space-y-2" id="top-variances">
+                            <!-- Populated by JS -->
+                        </div>
+
+                        <a href="#" id="view-all-forecasts" class="block text-center text-blue-600 hover:underline text-xs mt-3 hidden">
+                            View all forecasts →
+                        </a>
+                    </div>
+                    <div id="schedule-forecast-error" class="hidden text-center py-3 text-red-500 text-xs">
+                        <span id="forecast-error-msg">Error loading forecasts</span>
                     </div>
                 </div>
             </div>
@@ -709,6 +762,9 @@ $(document).ready(function() {
     // Calculate footer totals from row data
     calculateFooterTotals();
 
+    // Load schedule forecasts
+    loadScheduleForecasts();
+
     // Initialize DataTable
     const table = $('#gmp-table').DataTable({
         paging: false,
@@ -782,6 +838,105 @@ function calculateFooterTotals() {
 
 function formatCurrency(cents) {
     return '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Load schedule-driven forecasts
+async function loadScheduleForecasts() {
+    const loadingEl = document.getElementById('schedule-forecast-loading');
+    const contentEl = document.getElementById('schedule-forecast-content');
+    const errorEl = document.getElementById('schedule-forecast-error');
+
+    try {
+        const response = await fetch('/api/schedule/forecast-all');
+        const data = await response.json();
+
+        loadingEl.classList.add('hidden');
+
+        if (!data.success) {
+            errorEl.classList.remove('hidden');
+            document.getElementById('forecast-error-msg').textContent = data.error || 'Error loading forecasts';
+            return;
+        }
+
+        contentEl.classList.remove('hidden');
+
+        // Update project progress
+        const pct = data.project?.pct_complete || 0;
+        document.getElementById('project-pct').textContent = `${pct}%`;
+        document.getElementById('project-progress-bar').style.width = `${Math.min(100, pct)}%`;
+        document.getElementById('current-phase').textContent = data.project?.current_phase || '-';
+
+        // Update status badge
+        const badge = document.getElementById('schedule-status-badge');
+        const status = data.summary?.overall_status || 'on_track';
+        badge.classList.remove('hidden');
+        if (status === 'over') {
+            badge.textContent = 'Over';
+            badge.className = 'ml-2 text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700';
+        } else if (status === 'under') {
+            badge.textContent = 'Under';
+            badge.className = 'ml-2 text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700';
+        } else {
+            badge.textContent = 'On Track';
+            badge.className = 'ml-2 text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700';
+        }
+
+        // Update variance summary
+        const summaryBox = document.getElementById('variance-summary-box');
+        if (status === 'over') {
+            summaryBox.className = 'p-2 rounded-md mb-3 bg-red-50';
+        } else if (status === 'under') {
+            summaryBox.className = 'p-2 rounded-md mb-3 bg-green-50';
+        } else {
+            summaryBox.className = 'p-2 rounded-md mb-3 bg-gray-50';
+        }
+
+        document.getElementById('total-variance').textContent = data.summary?.total_variance_display || '-';
+        document.getElementById('total-variance').className = status === 'over' ? 'text-sm font-semibold text-red-600' :
+            (status === 'under' ? 'text-sm font-semibold text-green-600' : 'text-sm font-semibold text-gray-700');
+        document.getElementById('total-expected').textContent = data.summary?.total_expected_display || '-';
+        document.getElementById('total-spent').textContent = data.summary?.total_spent_display || '-';
+
+        // Render top variances
+        const variancesEl = document.getElementById('top-variances');
+        const forecasts = data.forecasts || [];
+
+        if (forecasts.length === 0) {
+            variancesEl.innerHTML = '<div class="text-xs text-gray-500 text-center py-2">No variance data</div>';
+        } else {
+            variancesEl.innerHTML = forecasts.slice(0, 5).map(f => {
+                const statusClass = f.variance_status === 'over' ? 'text-red-600' :
+                    (f.variance_status === 'under' ? 'text-green-600' : 'text-gray-600');
+                const bgClass = f.variance_status === 'over' ? 'bg-red-50' :
+                    (f.variance_status === 'under' ? 'bg-green-50' : 'bg-gray-50');
+
+                return `
+                    <div class="p-2 rounded ${bgClass}">
+                        <div class="flex justify-between items-start">
+                            <span class="text-xs font-medium text-gray-700 truncate" style="max-width: 140px;" title="${f.trade}">${f.trade}</span>
+                            <span class="text-xs font-semibold ${statusClass}">${f.variance_pct > 0 ? '+' : ''}${f.variance_pct}%</span>
+                        </div>
+                        <div class="text-xs text-gray-500 mt-0.5">
+                            ${f.schedule_variance_display} vs schedule
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Show "view all" link if more than 5 forecasts
+        if (data.trade_count > 5) {
+            const viewAll = document.getElementById('view-all-forecasts');
+            viewAll.classList.remove('hidden');
+            viewAll.href = '/forecast';
+        }
+
+    } catch (err) {
+        console.error('Error loading schedule forecasts:', err);
+        loadingEl.classList.add('hidden');
+        errorEl.classList.remove('hidden');
+        document.getElementById('forecast-error-msg').textContent = 'Failed to load forecasts';
+    }
 }
 
 function openEditModal(cell) {

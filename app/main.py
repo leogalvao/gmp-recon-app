@@ -3519,6 +3519,164 @@ async def get_schedule_summary(db: Session = Depends(get_db)):
     return compute_project_schedule_summary(db)
 
 
+@app.get("/api/schedule/forecast-all")
+async def get_schedule_forecast_all(db: Session = Depends(get_db)):
+    """
+    Get schedule-driven forecasts for all GMP divisions.
+    Uses the schedule-driven trainer for ML-based predictions.
+    """
+    from pathlib import Path
+
+    data_dir = Path(__file__).parent.parent / "data" / "raw"
+    schedule_file = data_dir / "schedule.csv"
+    breakdown_file = data_dir / "breakdown.csv"
+    direct_costs_file = data_dir / "direct_costs.csv"
+
+    # Check if data files exist
+    if not all(f.exists() for f in [schedule_file, breakdown_file, direct_costs_file]):
+        return {
+            "success": False,
+            "error": "Schedule data files not found",
+            "forecasts": [],
+            "summary": None
+        }
+
+    try:
+        from src.schedule.parser import ScheduleParser
+        from src.schedule.cost_allocator import ActivityCostAllocator
+
+        # Load data
+        schedule_df = pd.read_csv(schedule_file)
+        breakdown_df = pd.read_csv(breakdown_file)
+        direct_costs_df = pd.read_csv(direct_costs_file)
+
+        # Parse schedule
+        parser = ScheduleParser(schedule_df)
+        allocator = ActivityCostAllocator(parser, breakdown_df)
+
+        # Get current date for progress calculation
+        from datetime import date, datetime
+        today = datetime.now().date()
+
+        # Convert parser dates to date objects if they're datetimes
+        proj_start = parser.project_start.date() if hasattr(parser.project_start, 'date') else parser.project_start
+        proj_end = parser.project_end.date() if hasattr(parser.project_end, 'date') else parser.project_end
+
+        # Calculate project progress
+        project_duration = (proj_end - proj_start).days
+        days_elapsed = (today - proj_start).days
+        project_pct = min(100, max(0, days_elapsed / project_duration * 100)) if project_duration > 0 else 0
+
+        # Get current phase
+        current_phase = "UNKNOWN"
+        for phase in parser.phases:
+            phase_start = phase.start.date() if hasattr(phase.start, 'date') else phase.start
+            phase_end = phase.end.date() if hasattr(phase.end, 'date') else phase.end
+            if phase_start <= today <= phase_end:
+                current_phase = phase.name
+                break
+
+        # Build forecasts per trade
+        forecasts = []
+        total_budget = 0
+        total_spent = 0
+        total_expected = 0
+        total_variance = 0
+
+        # Aggregate actual costs by trade
+        date_col = next((c for c in ['date', 'Date'] if c in direct_costs_df.columns), None)
+        amount_col = next((c for c in ['amount', 'Amount'] if c in direct_costs_df.columns), None)
+
+        actual_by_trade = {}
+        if date_col and amount_col:
+            # Map costs to trades
+            for _, row in direct_costs_df.iterrows():
+                name = str(row.get('name', '') or row.get('Description', ''))
+                trade, _, _, _ = parser._map_to_trade(name)
+                if trade:
+                    actual_by_trade[trade] = actual_by_trade.get(trade, 0) + float(row[amount_col])
+
+        # Get expected costs per trade from allocator using as_of date
+        as_of = datetime.now()
+        for trade in allocator.gmp.keys():
+            budget = allocator.gmp.get(trade, 0)
+            expected = allocator.get_expected_cost_to_date(trade, as_of)
+            spent = actual_by_trade.get(trade, 0)
+
+            # Calculate schedule variance
+            schedule_variance = spent - expected
+            variance_pct = (schedule_variance / expected * 100) if expected > 0 else 0
+
+            # Simple forecast at completion based on schedule variance
+            if expected > 0 and spent > 0:
+                burn_rate = spent / expected if expected > 0 else 1
+                forecast_at_completion = budget * burn_rate
+            else:
+                forecast_at_completion = budget
+
+            budget_variance = forecast_at_completion - budget
+
+            forecasts.append({
+                "trade": trade,
+                "gmp_budget": budget,
+                "gmp_budget_display": f"${budget:,.0f}",
+                "spent_to_date": spent,
+                "spent_display": f"${spent:,.0f}",
+                "expected_by_schedule": expected,
+                "expected_display": f"${expected:,.0f}",
+                "schedule_variance": schedule_variance,
+                "schedule_variance_display": f"${schedule_variance:+,.0f}",
+                "variance_pct": round(variance_pct, 1),
+                "variance_status": "over" if schedule_variance > 0 else "under" if schedule_variance < 0 else "on_track",
+                "forecast_at_completion": forecast_at_completion,
+                "forecast_display": f"${forecast_at_completion:,.0f}",
+                "budget_variance": budget_variance,
+                "budget_variance_display": f"${budget_variance:+,.0f}"
+            })
+
+            total_budget += budget
+            total_spent += spent
+            total_expected += expected
+            total_variance += schedule_variance
+
+        # Sort by variance (worst first)
+        forecasts.sort(key=lambda x: x["variance_pct"], reverse=True)
+
+        return {
+            "success": True,
+            "project": {
+                "start": parser.project_start.isoformat(),
+                "end": parser.project_end.isoformat(),
+                "pct_complete": round(project_pct, 1),
+                "current_phase": current_phase,
+                "total_activities": len(parser.activities),
+                "phases": len(parser.phases)
+            },
+            "summary": {
+                "total_budget": total_budget,
+                "total_budget_display": f"${total_budget:,.0f}",
+                "total_spent": total_spent,
+                "total_spent_display": f"${total_spent:,.0f}",
+                "total_expected": total_expected,
+                "total_expected_display": f"${total_expected:,.0f}",
+                "total_variance": total_variance,
+                "total_variance_display": f"${total_variance:+,.0f}",
+                "overall_status": "over" if total_variance > 0 else "under" if total_variance < 0 else "on_track"
+            },
+            "forecasts": forecasts[:10],  # Top 10 variances
+            "trade_count": len(forecasts)
+        }
+
+    except Exception as e:
+        logger.exception("Error generating schedule forecasts")
+        return {
+            "success": False,
+            "error": str(e),
+            "forecasts": [],
+            "summary": None
+        }
+
+
 # =============================================================================
 # Enhanced Settings API (Task 8)
 # =============================================================================
