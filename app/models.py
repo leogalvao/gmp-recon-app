@@ -737,6 +737,9 @@ class ScheduleActivity(Base):
     mapping_source = Column(String(30), default='manual')  # manual, prefix_match, keyword_match, fuzzy_match
     mapping_confidence = Column(Float, default=1.0)  # 0.0-1.0
 
+    # Zone assignment (spatial link to GMP funding bucket)
+    zone = Column(String(10), nullable=True, index=True)  # EAST, WEST, SHARED
+
     imported_at = Column(DateTime, default=datetime.utcnow)
     source_file = Column(String(100))
 
