@@ -22,6 +22,26 @@ class Region(enum.Enum):
     BOTH = "Both"
 
 
+class Zone(enum.Enum):
+    """Spatial zone for cost allocation (alias for Region for spec compliance)."""
+    EAST = "East"
+    WEST = "West"
+    SHARED = "Shared"  # Maps to BOTH
+
+
+class ChangeOrderStatus(enum.Enum):
+    """Status of a change order."""
+    DRAFT = "draft"
+    PENDING = "pending"
+    APPROVED = "approved"
+
+
+class AllocationMethod(enum.Enum):
+    """How to handle costs mapped to SHARED budgets."""
+    DIRECT = "direct"         # Allocate to single zone
+    SPLIT_50_50 = "split_50_50"  # Split evenly between zones
+
+
 class ForecastBasis(enum.Enum):
     ACTUALS_ONLY = "actuals_only"
     ACTUALS_PLUS_COMMITMENTS = "actuals_plus_commitments"
@@ -404,6 +424,244 @@ class SideConfiguration(Base):
     allocation_weight = Column(Float, default=0.5)     # Weight for "Both" allocation split
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# =============================================================================
+# Project Entity (Level 0 in Hierarchy)
+# =============================================================================
+
+class Project(Base):
+    """
+    Top-level project entity.
+    All GMP allocations, budgets, and costs belong to a project.
+    """
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, index=True, nullable=False)  # External UUID
+    name = Column(String(200), nullable=False)
+    code = Column(String(50), unique=True, index=True, nullable=False)
+    description = Column(Text, nullable=True)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    is_active = Column(Boolean, default=True, index=True)
+    version_id = Column(Integer, default=1)  # Optimistic locking
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    gmps = relationship("GMP", back_populates="project", cascade="all, delete-orphan")
+    training_rounds = relationship("TrainingRound", back_populates="project", cascade="all, delete-orphan")
+
+
+# =============================================================================
+# GMP Entity (Level 1 - The Funding Ceiling)
+# =============================================================================
+
+class GMP(Base):
+    """
+    Guaranteed Maximum Price allocation.
+    The funding source, split by Division AND Zone.
+    INVARIANT: Σ(Budget.current_amount) <= (GMP.original + Σ(ApprovedCOs.amount))
+    """
+    __tablename__ = "gmp_entities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, index=True, nullable=False)  # External UUID
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False, index=True)
+    division = Column(String(200), nullable=False, index=True)  # CSI Division (e.g., '03-Concrete')
+    zone = Column(String(10), nullable=False, index=True)  # EAST, WEST, SHARED
+    original_amount_cents = Column(Integer, nullable=False)  # Immutable base contract value
+    description = Column(Text, nullable=True)
+    version_id = Column(Integer, default=1)  # Optimistic locking
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    project = relationship("Project", back_populates="gmps")
+    budgets = relationship("BudgetEntity", back_populates="gmp", cascade="all, delete-orphan")
+    change_orders = relationship("ChangeOrder", back_populates="gmp", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint('project_id', 'division', 'zone', name='uq_project_division_zone'),
+    )
+
+    @property
+    def approved_change_order_total_cents(self) -> int:
+        """Sum of approved change orders."""
+        return sum(co.amount_cents for co in self.change_orders
+                   if co.status == ChangeOrderStatus.APPROVED.value)
+
+    @property
+    def authorized_amount_cents(self) -> int:
+        """Original + Approved Change Orders."""
+        return self.original_amount_cents + self.approved_change_order_total_cents
+
+
+# =============================================================================
+# Budget Entity (Level 2 - The Plan)
+# =============================================================================
+
+class BudgetEntity(Base):
+    """
+    Allocated bucket of money. Must belong to a Zone.
+    INVARIANT: Budget.zone MUST MATCH GMP.zone (SPATIAL_INTEGRITY)
+    """
+    __tablename__ = "budget_entities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, index=True, nullable=False)  # External UUID
+    gmp_id = Column(Integer, ForeignKey('gmp_entities.id'), nullable=False, index=True)
+    cost_code = Column(String(50), nullable=False, index=True)  # Must match Schedule Activity Code
+    description = Column(String(500), nullable=True)
+    zone = Column(String(10), nullable=True, index=True)  # Nullable on ingestion, assigned via UI
+    current_budget_cents = Column(Integer, nullable=False, default=0)
+    committed_cents = Column(Integer, default=0)  # Committed amount (contracts)
+    version_id = Column(Integer, default=1)  # Optimistic locking
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    gmp = relationship("GMP", back_populates="budgets")
+    direct_costs = relationship("DirectCostEntity", back_populates="budget")
+
+
+# =============================================================================
+# Change Order Entity (Level 3b - The ONLY way to adjust GMP ceiling)
+# =============================================================================
+
+class ChangeOrder(Base):
+    """
+    Contract modification. The ONLY way to increase/decrease the GMP ceiling.
+    Positive amount adds to scope, negative deducts.
+    """
+    __tablename__ = "change_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, index=True, nullable=False)  # External UUID
+    gmp_id = Column(Integer, ForeignKey('gmp_entities.id'), nullable=False, index=True)
+    number = Column(String(50), nullable=False, index=True)  # CO Number (e.g., "CO-001")
+    title = Column(String(500), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default='draft')  # draft, pending, approved
+    amount_cents = Column(Integer, nullable=False)  # Can be positive or negative
+    requested_date = Column(Date, nullable=True)
+    approved_date = Column(Date, nullable=True)
+    approved_by = Column(String(100), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    version_id = Column(Integer, default=1)  # Optimistic locking
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    gmp = relationship("GMP", back_populates="change_orders")
+
+    __table_args__ = (
+        UniqueConstraint('gmp_id', 'number', name='uq_gmp_co_number'),
+    )
+
+
+# =============================================================================
+# Direct Cost Entity (Level 3 - The Actuals)
+# =============================================================================
+
+class DirectCostEntity(Base):
+    """
+    Actual transaction/cost incurred on the project.
+    INVARIANT: Payable = GrossAmount - RetainageHeld
+    """
+    __tablename__ = "direct_cost_entities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, index=True, nullable=False)  # External UUID
+    mapped_budget_id = Column(Integer, ForeignKey('budget_entities.id'), nullable=True, index=True)
+    source_row_id = Column(Integer, nullable=True)  # Row from source file
+    vendor_name = Column(String(255), nullable=True)
+    vendor_normalized = Column(String(255), nullable=True, index=True)
+    description = Column(String(500), nullable=True)
+    transaction_date = Column(Date, nullable=True, index=True)
+    gross_amount_cents = Column(Integer, nullable=False)
+    retainage_amount_cents = Column(Integer, default=0)  # Amount held back
+    allocation_method = Column(String(20), default='direct')  # direct, split_50_50
+    zone = Column(String(10), nullable=True, index=True)  # Derived from budget
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    budget = relationship("BudgetEntity", back_populates="direct_costs")
+
+    @property
+    def payable_amount_cents(self) -> int:
+        """Net payment = Gross - Retainage held."""
+        return self.gross_amount_cents - self.retainage_amount_cents
+
+
+# =============================================================================
+# Training Round Entity (The "Brain" Versioning)
+# =============================================================================
+
+class TrainingRound(Base):
+    """
+    Captures a version of the calculation/ML engine.
+    Created each time the system "learns" from user feedback.
+    """
+    __tablename__ = "training_rounds"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, index=True, nullable=False)  # External UUID
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=True, index=True)
+    triggered_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    trigger_type = Column(String(50), default='manual')  # manual, nightly, file_change, user_feedback
+    status = Column(String(20), default='pending')  # pending, running, completed, failed
+    completed_at = Column(DateTime, nullable=True)
+
+    # Performance metrics
+    linkage_score = Column(Float, nullable=True)  # % of costs successfully linked to schedule
+    mapping_accuracy = Column(Float, nullable=True)  # % of mappings with high confidence
+    budget_coverage = Column(Float, nullable=True)  # % of budgets linked to GMP
+    cost_coverage = Column(Float, nullable=True)  # % of costs linked to budgets
+
+    # Model metadata
+    model_version = Column(String(50), nullable=True)
+    model_params = Column(Text, nullable=True)  # JSON of model parameters
+    training_notes = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    # Comparison with previous round
+    previous_round_id = Column(Integer, nullable=True)
+    eac_change_cents = Column(Integer, nullable=True)  # Change in total EAC from previous
+    eac_change_pct = Column(Float, nullable=True)  # % change in EAC
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("Project", back_populates="training_rounds")
+    forecast_snapshots = relationship("TrainingForecastSnapshot", back_populates="training_round")
+
+
+class TrainingForecastSnapshot(Base):
+    """
+    Forecast curve points for a specific training round.
+    Stores predicted cumulative costs over time, by zone.
+    """
+    __tablename__ = "training_forecast_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    training_round_id = Column(Integer, ForeignKey('training_rounds.id'), nullable=False, index=True)
+    period_date = Column(Date, nullable=False, index=True)
+    predicted_cumulative_cost_cents = Column(Integer, nullable=False)
+    actual_cumulative_cost_cents = Column(Integer, nullable=True)  # If available at time
+    zone = Column(String(10), nullable=False, index=True)  # EAST, WEST, SHARED
+    confidence_lower_cents = Column(Integer, nullable=True)  # Lower bound
+    confidence_upper_cents = Column(Integer, nullable=True)  # Upper bound
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    training_round = relationship("TrainingRound", back_populates="forecast_snapshots")
+
+    __table_args__ = (
+        UniqueConstraint('training_round_id', 'period_date', 'zone', name='uq_training_period_zone'),
+    )
 
 
 # =============================================================================
