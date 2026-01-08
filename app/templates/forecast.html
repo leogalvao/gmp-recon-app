@@ -34,6 +34,8 @@
         border-radius: 8px;
         padding: 1rem;
         border: 1px solid #e5e7eb;
+        min-width: 0; /* Allow grid item to shrink below content size */
+        overflow: hidden; /* Clip content at rounded border */
     }
 
     .metric-card.highlight {
@@ -50,9 +52,13 @@
     }
 
     .metric-value {
-        font-size: 1.25rem;
+        font-size: clamp(1rem, 2.5vw, 1.25rem); /* Responsive: scales between 1rem and 1.25rem */
         font-weight: 700;
         color: #111827;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .metric-value.surplus { color: #16a34a; }
@@ -63,6 +69,9 @@
         font-size: 0.75rem;
         color: #9ca3af;
         margin-top: 0.25rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     /* Toggle buttons */
