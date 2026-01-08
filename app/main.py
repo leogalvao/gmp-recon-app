@@ -359,6 +359,66 @@ async def root():
     return RedirectResponse(url="/gmp")
 
 
+def get_schedule_variances() -> Dict[str, Dict]:
+    """
+    Get schedule variance data for all GMP trades.
+    Returns dict of trade -> {expected, spent, variance, variance_pct, status}
+    """
+    from pathlib import Path
+    from datetime import datetime
+
+    data_dir = Path(__file__).parent.parent / "data" / "raw"
+    schedule_file = data_dir / "schedule.csv"
+    breakdown_file = data_dir / "breakdown.csv"
+    direct_costs_file = data_dir / "direct_costs.csv"
+
+    if not all(f.exists() for f in [schedule_file, breakdown_file, direct_costs_file]):
+        return {}
+
+    try:
+        from src.schedule.parser import ScheduleParser
+        from src.schedule.cost_allocator import ActivityCostAllocator
+
+        schedule_df = pd.read_csv(schedule_file)
+        breakdown_df = pd.read_csv(breakdown_file)
+        direct_costs_df = pd.read_csv(direct_costs_file)
+
+        parser = ScheduleParser(schedule_df)
+        allocator = ActivityCostAllocator(parser, breakdown_df)
+
+        # Aggregate actual costs by trade
+        amount_col = next((c for c in ['amount', 'Amount'] if c in direct_costs_df.columns), None)
+        actual_by_trade = {}
+        if amount_col:
+            for _, row in direct_costs_df.iterrows():
+                name = str(row.get('name', '') or row.get('Description', ''))
+                trade, _, _, _ = parser._map_to_trade(name)
+                if trade:
+                    actual_by_trade[trade] = actual_by_trade.get(trade, 0) + float(row[amount_col])
+
+        # Calculate variances
+        as_of = datetime.now()
+        variances = {}
+        for trade in allocator.gmp.keys():
+            expected = allocator.get_expected_cost_to_date(trade, as_of)
+            spent = actual_by_trade.get(trade, 0)
+            variance = spent - expected
+            variance_pct = (variance / expected * 100) if expected > 0 else 0
+
+            variances[trade] = {
+                'expected': expected,
+                'spent': spent,
+                'variance': variance,
+                'variance_pct': round(variance_pct, 1),
+                'status': 'over' if variance > 0 else 'under' if variance < 0 else 'on_track'
+            }
+
+        return variances
+    except Exception as e:
+        logger.warning(f"Could not calculate schedule variances: {e}")
+        return {}
+
+
 @app.get("/gmp", response_class=HTMLResponse)
 async def gmp_page(
     request: Request,
@@ -379,6 +439,18 @@ async def gmp_page(
                 side_filter = side_upper
 
         result = run_full_reconciliation(db, side_filter=side_filter)
+
+        # Get schedule variance data
+        schedule_variances = get_schedule_variances()
+
+        # Add schedule variance to each row
+        for row in result['recon_rows']:
+            gmp_div = row['gmp_division']
+            var_data = schedule_variances.get(gmp_div, {})
+            row['schedule_variance'] = var_data.get('variance', 0)
+            row['schedule_variance_pct'] = var_data.get('variance_pct', 0)
+            row['schedule_variance_status'] = var_data.get('status', 'on_track')
+            row['schedule_expected'] = var_data.get('expected', 0)
 
         return templates.TemplateResponse("gmp.html", {
             "request": request,

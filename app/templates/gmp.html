@@ -370,6 +370,10 @@
                         <input type="checkbox" class="col-toggle rounded text-blue-600 mr-1" data-col="pct_spent">
                         <span>% Spent</span>
                     </label>
+                    <label class="inline-flex items-center cursor-pointer hover:text-blue-600">
+                        <input type="checkbox" class="col-toggle rounded text-blue-600 mr-1" data-col="sched_var" checked>
+                        <span>Schedule Var</span>
+                    </label>
                 </div>
 
                 <!-- Help Hints -->
@@ -406,6 +410,7 @@
                             <th class="text-right col-committed_total hidden">Committed</th>
                             <th class="text-right col-eac_total hidden">EAC Total</th>
                             <th class="text-right col-pct_spent hidden">% Spent</th>
+                            <th class="text-right col-sched_var" title="Actual vs Expected (schedule-based)">Sched Var</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -475,6 +480,16 @@
                             <td class="text-right col-committed_total hidden text-gray-600">{{ row.committed_total }}</td>
                             <td class="text-right col-eac_total hidden text-gray-600">{{ row.eac_total }}</td>
                             <td class="text-right col-pct_spent hidden text-gray-600">{{ row.pct_spent }}</td>
+                            <td class="text-right col-sched_var">
+                                {% if row.schedule_variance != 0 or row.schedule_expected > 0 %}
+                                <span class="{% if row.schedule_variance_status == 'over' %}text-red-600{% elif row.schedule_variance_status == 'under' %}text-green-600{% else %}text-gray-600{% endif %}"
+                                      title="Expected: ${{ '{:,.0f}'.format(row.schedule_expected) }}">
+                                    {% if row.schedule_variance >= 0 %}+{% endif %}{{ '{:.1f}'.format(row.schedule_variance_pct) }}%
+                                </span>
+                                {% else %}
+                                <span class="text-gray-400">-</span>
+                                {% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -494,6 +509,7 @@
                             <td class="text-right col-committed_total hidden">-</td>
                             <td class="text-right col-eac_total hidden">{{ summary.total_eac }}</td>
                             <td class="text-right col-pct_spent hidden">-</td>
+                            <td class="text-right col-sched_var" id="total-sched-var">-</td>
                         </tr>
                     </tfoot>
                 </table>
@@ -929,6 +945,19 @@ async function loadScheduleForecasts() {
             const viewAll = document.getElementById('view-all-forecasts');
             viewAll.classList.remove('hidden');
             viewAll.href = '/forecast';
+        }
+
+        // Update total schedule variance in footer
+        const totalVariance = data.summary?.total_variance || 0;
+        const totalExpected = data.summary?.total_expected || 1;
+        const totalVariancePct = (totalVariance / totalExpected * 100).toFixed(1);
+        const totalVarEl = document.getElementById('total-sched-var');
+        if (totalVarEl) {
+            totalVarEl.textContent = `${totalVariance >= 0 ? '+' : ''}${totalVariancePct}%`;
+            totalVarEl.className = `text-right col-sched_var font-semibold ${
+                status === 'over' ? 'text-red-600' :
+                status === 'under' ? 'text-green-600' : 'text-gray-600'
+            }`;
         }
 
     } catch (err) {
