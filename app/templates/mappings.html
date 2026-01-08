@@ -36,7 +36,7 @@
     <!-- Budget to GMP Mapping - Redesigned with API-driven rendering -->
     <div class="space-y-4">
         <!-- Search/Filter Controls - Sticky -->
-        <div id="budgetFilterBar" class="sticky top-0 z-20 bg-white -mx-6 px-6 py-3 border-b shadow-sm">
+        <div id="budgetFilterBar" class="sticky top-16 z-20 bg-white -mx-6 px-6 py-3 border-b shadow-sm">
             <!-- Row 1: Search + Status Segmented Control -->
             <div class="flex flex-wrap gap-3 items-center mb-3">
                 <div class="flex-1 min-w-52 max-w-md">
@@ -392,9 +392,69 @@
 
     {% elif active_tab == 'direct_to_budget' %}
     <!-- Direct Cost to Budget Mapping - Unified Table UI (API-driven) -->
-    <div class="space-y-6">
-        <!-- Search/Filter Controls - Sticky -->
-        <div id="directFilterBar" class="sticky top-0 z-20 bg-white -mx-6 px-6 py-3 border-b shadow-sm">
+    <div class="space-y-4">
+        <!-- Score Breakdown Legend (always visible at top) -->
+        <div class="flex items-center gap-4 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+            <span class="font-medium text-gray-700">Score breakdown:</span>
+            <span class="flex items-center gap-1">
+                <div class="w-2 h-3 rounded-sm bg-blue-400"></div> Code Match
+            </span>
+            <span class="flex items-center gap-1">
+                <div class="w-2 h-3 rounded-sm bg-purple-400"></div> Type Match
+            </span>
+            <span class="flex items-center gap-1">
+                <div class="w-2 h-3 rounded-sm bg-green-400"></div> Text Similarity
+            </span>
+            <span class="flex items-center gap-1">
+                <div class="w-2 h-3 rounded-sm bg-orange-400"></div> Historical
+            </span>
+            <span class="text-gray-400 ml-2">(darker = higher score)</span>
+        </div>
+
+        <!-- Progress Stats (always visible at top) -->
+        <div class="grid grid-cols-5 gap-4 text-center" id="directStatsContainer">
+            <div class="bg-blue-50 rounded-lg p-3">
+                <div class="text-2xl font-bold text-blue-600" id="statTotal">-</div>
+                <div class="text-sm text-blue-700">Total Items</div>
+            </div>
+            <div class="bg-green-50 rounded-lg p-3 border-2 border-green-200">
+                <div class="text-2xl font-bold text-green-600" id="statMapped">-</div>
+                <div class="text-sm text-green-700">Mapped</div>
+            </div>
+            <div class="bg-emerald-50 rounded-lg p-3 cursor-pointer hover:ring-2 hover:ring-emerald-400" onclick="setConfidenceFilter('high')">
+                <div class="text-2xl font-bold text-emerald-600" id="statHigh">-</div>
+                <div class="text-sm text-emerald-700">High Conf.</div>
+                <div class="text-xs text-emerald-500">≥85%</div>
+            </div>
+            <div class="bg-yellow-50 rounded-lg p-3 cursor-pointer hover:ring-2 hover:ring-yellow-400" onclick="setConfidenceFilter('medium')">
+                <div class="text-2xl font-bold text-yellow-600" id="statMedium">-</div>
+                <div class="text-sm text-yellow-700">Medium</div>
+                <div class="text-xs text-yellow-500">60-84%</div>
+            </div>
+            <div class="bg-red-50 rounded-lg p-3 cursor-pointer hover:ring-2 hover:ring-red-400" onclick="setConfidenceFilter('low')">
+                <div class="text-2xl font-bold text-red-600" id="statLow">-</div>
+                <div class="text-sm text-red-700">Needs Review</div>
+                <div class="text-xs text-red-500">&lt;60%</div>
+            </div>
+        </div>
+
+        <!-- Bulk Actions (shown when high-confidence items exist) -->
+        <div id="bulkActionsContainer" class="bg-green-50 border border-green-200 rounded-lg p-4 flex justify-between items-center hidden">
+            <div>
+                <span class="font-medium text-green-800"><span id="bulkHighCount">0</span> items ready for bulk accept</span>
+                <p class="text-sm text-green-600">High-confidence matches (≥85%) can be accepted automatically.</p>
+            </div>
+            <button onclick="bulkAcceptHighConfidence()" id="bulkAcceptBtn"
+                    class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                Accept All High-Confidence
+            </button>
+        </div>
+
+        <!-- Search/Filter Controls - Sticky (appears below stats when scrolling) -->
+        <div id="directFilterBar" class="sticky top-16 z-20 bg-white -mx-6 px-6 py-3 border-y shadow-sm">
             <!-- Row 1: Search + Status Segmented Control -->
             <div class="flex flex-wrap gap-3 items-center mb-3">
                 <div class="flex-1 min-w-52 max-w-md">
@@ -478,7 +538,7 @@
                 <div class="flex-1"></div>
 
                 <!-- Density Toggle -->
-                <div class="flex items-center gap-1 border rounded-lg p-1">
+                <div class="flex items-center gap-1 border rounded-lg p-1 bg-white">
                     <button type="button" id="densityComfortable" class="density-btn p-1.5 rounded text-gray-500 hover:bg-gray-100 active bg-gray-100 text-gray-900" title="Comfortable density" data-density="comfortable">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
@@ -498,68 +558,8 @@
             </div>
         </div>
 
-        <!-- Score Breakdown Legend -->
-        <div class="flex items-center gap-4 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
-            <span class="font-medium text-gray-700">Score breakdown:</span>
-            <span class="flex items-center gap-1">
-                <div class="w-2 h-3 rounded-sm bg-blue-400"></div> Code Match
-            </span>
-            <span class="flex items-center gap-1">
-                <div class="w-2 h-3 rounded-sm bg-purple-400"></div> Type Match
-            </span>
-            <span class="flex items-center gap-1">
-                <div class="w-2 h-3 rounded-sm bg-green-400"></div> Text Similarity
-            </span>
-            <span class="flex items-center gap-1">
-                <div class="w-2 h-3 rounded-sm bg-orange-400"></div> Historical
-            </span>
-            <span class="text-gray-400 ml-2">(darker = higher score)</span>
-        </div>
-
-        <!-- Progress Stats (dynamically updated) -->
-        <div class="grid grid-cols-5 gap-4 text-center" id="directStatsContainer">
-            <div class="bg-blue-50 rounded-lg p-3">
-                <div class="text-2xl font-bold text-blue-600" id="statTotal">-</div>
-                <div class="text-sm text-blue-700">Total Items</div>
-            </div>
-            <div class="bg-green-50 rounded-lg p-3 border-2 border-green-200">
-                <div class="text-2xl font-bold text-green-600" id="statMapped">-</div>
-                <div class="text-sm text-green-700">Mapped</div>
-            </div>
-            <div class="bg-emerald-50 rounded-lg p-3 cursor-pointer hover:ring-2 hover:ring-emerald-400" onclick="setConfidenceFilter('high')">
-                <div class="text-2xl font-bold text-emerald-600" id="statHigh">-</div>
-                <div class="text-sm text-emerald-700">High Conf.</div>
-                <div class="text-xs text-emerald-500">≥85%</div>
-            </div>
-            <div class="bg-yellow-50 rounded-lg p-3 cursor-pointer hover:ring-2 hover:ring-yellow-400" onclick="setConfidenceFilter('medium')">
-                <div class="text-2xl font-bold text-yellow-600" id="statMedium">-</div>
-                <div class="text-sm text-yellow-700">Medium</div>
-                <div class="text-xs text-yellow-500">60-84%</div>
-            </div>
-            <div class="bg-red-50 rounded-lg p-3 cursor-pointer hover:ring-2 hover:ring-red-400" onclick="setConfidenceFilter('low')">
-                <div class="text-2xl font-bold text-red-600" id="statLow">-</div>
-                <div class="text-sm text-red-700">Needs Review</div>
-                <div class="text-xs text-red-500">&lt;60%</div>
-            </div>
-        </div>
-
-        <!-- Bulk Actions (shown when high-confidence items exist) -->
-        <div id="bulkActionsContainer" class="bg-green-50 border border-green-200 rounded-lg p-4 flex justify-between items-center hidden">
-            <div>
-                <span class="font-medium text-green-800"><span id="bulkHighCount">0</span> items ready for bulk accept</span>
-                <p class="text-sm text-green-600">High-confidence matches (≥85%) can be accepted automatically.</p>
-            </div>
-            <button onclick="bulkAcceptHighConfidence()" id="bulkAcceptBtn"
-                    class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                Accept All High-Confidence
-            </button>
-        </div>
-
         <!-- Two-Pane Layout: Table + Details Drawer -->
-        <div id="directTwoPaneContainer" class="flex gap-0 h-[calc(100vh-380px)] min-h-[450px]">
+        <div id="directTwoPaneContainer" class="flex gap-0 h-[calc(100vh-480px)] min-h-[400px]">
             <!-- Main Table Pane -->
             <div id="directTableContainer" class="flex-1 border rounded-lg overflow-x-auto overflow-y-auto relative transition-all duration-300">
             <!-- Loading Skeleton -->
@@ -5411,11 +5411,23 @@ function resetSelectionsOnReload() {
    Dropdown Clipping Fix - Overflow Handling
    ============================================================ */
 
-/* Allow dropdowns to overflow table containers */
+/* Table containers need scrollable content but visible dropdowns */
 #directTableContainer,
 #budgetTableContainer {
-    overflow: visible !important;
+    overflow-x: auto;
     overflow-y: auto;
+    /* Use clip-path instead of overflow:hidden to allow select dropdowns to escape */
+}
+
+/* Two-pane containers should not clip dropdowns */
+#directTwoPaneContainer,
+#budgetTwoPaneContainer {
+    overflow: visible;
+}
+
+/* Card wrapper should allow overflow for dropdowns */
+.card {
+    overflow: visible;
 }
 
 /* Ensure dropdown portals appear above everything */
@@ -5642,9 +5654,10 @@ select option {
 #directFilterBar,
 #budgetFilterBar {
     position: sticky;
-    top: 0;
+    top: 4rem; /* Account for navbar height (h-16 = 64px = 4rem) */
     z-index: 30;
     overflow: visible;
+    background: white;
 }
 
 #directFilterBar select,
