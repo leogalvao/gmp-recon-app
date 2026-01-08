@@ -165,21 +165,21 @@ class BudgetBlockingIndex:
 
         Returns deduplicated list of candidates.
         """
-        candidates = set()
+        candidates = []
         seen_codes = set()
 
         # 1. Primary block: same base_code
         if dc_base_code and dc_base_code in self.by_base_code:
             for row in self.by_base_code[dc_base_code]:
                 if row.budget_code not in seen_codes:
-                    candidates.add(row)
+                    candidates.append(row)
                     seen_codes.add(row.budget_code)
 
         # 2. Secondary block: same cost type
         if dc_type_code and dc_type_code in self.by_type:
             for row in self.by_type[dc_type_code]:
                 if row.budget_code not in seen_codes:
-                    candidates.add(row)
+                    candidates.append(row)
                     seen_codes.add(row.budget_code)
 
         # 3. Fallback: sample of remaining rows if we have few candidates
@@ -187,12 +187,12 @@ class BudgetBlockingIndex:
             remaining = self.fallback_sample_size - len(candidates)
             for row in self.all_rows[:remaining * 2]:  # Oversample to find unique
                 if row.budget_code not in seen_codes:
-                    candidates.add(row)
+                    candidates.append(row)
                     seen_codes.add(row.budget_code)
                     if len(candidates) >= self.fallback_sample_size:
                         break
 
-        return list(candidates)
+        return candidates
 
 
 # =============================================================================
