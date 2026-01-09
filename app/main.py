@@ -494,6 +494,32 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         # Get mapping stats
         mapping_stats = result.get('mapping_stats', {})
 
+        # Calculate monthly cost trend from direct costs
+        cost_trend = []
+        try:
+            from pathlib import Path
+            data_dir = Path(__file__).parent.parent / "data" / "raw"
+            direct_costs_file = data_dir / "direct_costs.csv"
+            if direct_costs_file.exists():
+                dc_df = pd.read_csv(direct_costs_file)
+                date_col = next((c for c in ['Date', 'date'] if c in dc_df.columns), None)
+                amount_col = next((c for c in ['Amount', 'amount'] if c in dc_df.columns), None)
+                if date_col and amount_col:
+                    dc_df[date_col] = pd.to_datetime(dc_df[date_col], errors='coerce')
+                    dc_df = dc_df.dropna(subset=[date_col])
+                    dc_df['month'] = dc_df[date_col].dt.to_period('M')
+                    monthly = dc_df.groupby('month')[amount_col].sum().sort_index()
+                    cumulative = 0
+                    for period, amount in monthly.items():
+                        cumulative += amount
+                        cost_trend.append({
+                            'month': str(period),
+                            'monthly': round(amount, 2),
+                            'cumulative': round(cumulative, 2)
+                        })
+        except Exception as e:
+            logger.warning(f"Could not calculate cost trend: {e}")
+
         # Use reconciliation data as the primary source (matches GMP page)
         # Only fall back to dashboard_summary if recon data is unavailable
         total_gmp_cents = total_gmp_from_recon if total_gmp_from_recon > 0 else dashboard_summary['total_gmp_budget_cents']
@@ -539,6 +565,7 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
             "health_counts": health_counts,
             "mapping_stats": mapping_stats,
             "division_count": len(division_cards),
+            "cost_trend": cost_trend,
             "active_page": "dashboard"
         })
     except Exception as e:

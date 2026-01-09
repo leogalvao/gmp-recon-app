@@ -398,6 +398,29 @@
             </div>
         </div>
 
+        <!-- Cost Trend Chart -->
+        {% if cost_trend %}
+        <div class="bg-white rounded-xl p-6 shadow-sm border mb-8">
+            <div class="section-header">
+                <h2 class="section-title">Cost Trend Over Time</h2>
+                <div class="flex items-center gap-4 text-sm">
+                    <span class="flex items-center gap-1">
+                        <span class="w-3 h-3 rounded bg-blue-500"></span> Cumulative
+                    </span>
+                    <span class="flex items-center gap-1">
+                        <span class="w-3 h-3 rounded bg-emerald-500"></span> Monthly
+                    </span>
+                    <span class="flex items-center gap-1">
+                        <span class="w-3 h-3 rounded-full border-2 border-dashed border-red-500"></span> Budget
+                    </span>
+                </div>
+            </div>
+            <div class="h-[350px]">
+                <canvas id="costTrendChart"></canvas>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Quick Links -->
         <div class="mb-8">
             <h2 class="section-title mb-4">Quick Actions</h2>
@@ -594,7 +617,7 @@ document.addEventListener('DOMContentLoaded', function() {
         ]
     };
 
-    new Chart(ctx, {
+    const budgetActualChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: chartData.labels,
@@ -703,6 +726,131 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     });
+
+    // Cost Trend Chart
+    const trendCtx = document.getElementById('costTrendChart');
+    if (trendCtx) {
+        const trendData = {
+            labels: [
+                {% for item in cost_trend %}
+                "{{ item.month }}"{% if not loop.last %},{% endif %}
+                {% endfor %}
+            ],
+            monthly: [
+                {% for item in cost_trend %}
+                {{ item.monthly }}{% if not loop.last %},{% endif %}
+                {% endfor %}
+            ],
+            cumulative: [
+                {% for item in cost_trend %}
+                {{ item.cumulative }}{% if not loop.last %},{% endif %}
+                {% endfor %}
+            ]
+        };
+
+        // Budget line (total GMP spread across all months)
+        const totalBudget = {{ project_metrics.total_gmp_cents / 100 if project_metrics.total_gmp_cents else 0 }};
+        const budgetLine = trendData.labels.map(() => totalBudget);
+
+        new Chart(trendCtx, {
+            type: 'line',
+            data: {
+                labels: trendData.labels,
+                datasets: [
+                    {
+                        label: 'Cumulative Spend',
+                        data: trendData.cumulative,
+                        borderColor: 'rgb(59, 130, 246)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        borderWidth: 2,
+                        order: 1
+                    },
+                    {
+                        label: 'Monthly Spend',
+                        data: trendData.monthly,
+                        type: 'bar',
+                        backgroundColor: 'rgba(16, 185, 129, 0.6)',
+                        borderColor: 'rgb(16, 185, 129)',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        order: 2
+                    },
+                    {
+                        label: 'Total Budget',
+                        data: budgetLine,
+                        borderColor: 'rgb(239, 68, 68)',
+                        borderWidth: 2,
+                        borderDash: [8, 4],
+                        pointRadius: 0,
+                        fill: false,
+                        order: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                        titleFont: { size: 13, weight: 'bold' },
+                        bodyFont: { size: 12 },
+                        padding: 12,
+                        cornerRadius: 8,
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.raw;
+                                return context.dataset.label + ': $' + value.toLocaleString('en-US', {
+                                    minimumFractionDigits: 0,
+                                    maximumFractionDigits: 0
+                                });
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            display: false
+                        },
+                        ticks: {
+                            font: { size: 10 },
+                            maxRotation: 45,
+                            minRotation: 45
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.05)'
+                        },
+                        ticks: {
+                            font: { size: 11 },
+                            callback: function(value) {
+                                if (value >= 1000000) {
+                                    return '$' + (value / 1000000).toFixed(1) + 'M';
+                                } else if (value >= 1000) {
+                                    return '$' + (value / 1000).toFixed(0) + 'K';
+                                }
+                                return '$' + value;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
 });
 </script>
 {% endblock %}
