@@ -373,6 +373,19 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         result = run_full_reconciliation(db)
         recon_rows = result['recon_rows']
 
+        # Diagnostic logging for dashboard metrics
+        total_gmp_from_rows = sum(r.get('gmp_amount_raw', 0) for r in recon_rows)
+        total_actual_from_rows = sum((r.get('actual_west_raw', 0) + r.get('actual_east_raw', 0)) for r in recon_rows)
+        total_eac_from_rows = sum(r.get('eac_total_raw', 0) for r in recon_rows)
+        logger.info(f"Dashboard metrics debug:")
+        logger.info(f"  GMP from entity table: {dashboard_summary['total_gmp_budget_cents']}")
+        logger.info(f"  GMP from recon rows: {total_gmp_from_rows}")
+        logger.info(f"  Actual from entity table: {dashboard_summary['actual_costs_cents']}")
+        logger.info(f"  Actual from recon rows: {total_actual_from_rows}")
+        logger.info(f"  EAC from entity table: {dashboard_summary['eac_cents']}")
+        logger.info(f"  EAC from recon rows: {total_eac_from_rows}")
+        logger.info(f"  Forecast remaining: {dashboard_summary['forecast_remaining_cents']}")
+
         # Get schedule variances for per-division display
         schedule_variances = get_schedule_variances()
 
@@ -389,9 +402,12 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         division_cards = []
         for row in recon_rows:
             gmp_div = row['gmp_division']
-            gmp_cents = row.get('gmp_amount_cents', 0) or 0
-            actual_cents = row.get('actual_total_cents', 0) or 0
-            variance_cents = row.get('variance_cents', 0) or 0
+            # Use raw cents values from format_for_display output
+            gmp_cents = row.get('gmp_amount_raw', 0) or 0
+            actual_cents = (row.get('actual_west_raw', 0) or 0) + (row.get('actual_east_raw', 0) or 0)
+            # Calculate variance as GMP - EAC
+            eac_row_cents = row.get('eac_total_raw', 0) or 0
+            variance_cents = gmp_cents - eac_row_cents
 
             # Get forecast data for this division
             div_forecast = next((d for d in forecast_rollup.get('by_division', []) if d['gmp_division'] == gmp_div), {})
@@ -442,11 +458,42 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         # Get mapping stats
         mapping_stats = result.get('mapping_stats', {})
 
-        # Build project_metrics from dashboard_summary (single source of truth)
+        # Compute totals from division cards (derived from recon_df)
+        # This is more reliable than the entity table which may be empty
+        total_gmp_from_recon = sum(d['gmp_cents'] for d in division_cards)
+        total_actual_from_recon = sum(d['actual_cents'] for d in division_cards)
+        total_eac_from_recon = sum(d.get('eac_cents', 0) for d in division_cards)
+
+        # Use dashboard_summary values if available, otherwise fall back to recon data
         total_gmp_cents = dashboard_summary['total_gmp_budget_cents']
+        if total_gmp_cents == 0 and total_gmp_from_recon > 0:
+            # Entity table is empty but we have data from CSV/recon
+            total_gmp_cents = total_gmp_from_recon
+            if "GMP Budget data unavailable or zero" not in dashboard_summary['warnings']:
+                dashboard_summary['warnings'] = [w for w in dashboard_summary['warnings']
+                                                 if w != "GMP Budget data unavailable or zero"]
+
         actual_cents_total = dashboard_summary['actual_costs_cents']
+        if actual_cents_total == 0 and total_actual_from_recon > 0:
+            # Use recon data for actuals
+            actual_cents_total = total_actual_from_recon
+
+        # EAC = Actual + Forecast Remaining (NOT commitments as fallback)
+        # If entity tables are empty, compute from recon data
         eac_cents_total = dashboard_summary['eac_cents']
-        variance_cents = dashboard_summary['variance_cents']
+        if dashboard_summary['actual_costs_cents'] == 0 and dashboard_summary['forecast_remaining_cents'] == 0:
+            # When there are no actuals and no forecast, EAC should be 0 (not budget!)
+            # Use the sum of EAC from division cards (which comes from compute_reconciliation)
+            eac_cents_total = total_eac_from_recon
+
+        # Variance = Budget - EAC (positive = underrun, negative = overrun)
+        variance_cents = total_gmp_cents - eac_cents_total if total_gmp_cents > 0 else None
+
+        # Progress = Actual / EAC
+        progress_pct = 0.0
+        if eac_cents_total > 0:
+            progress_pct = round((actual_cents_total / eac_cents_total) * 100, 1)
+            progress_pct = max(0.0, min(100.0, progress_pct))
 
         # Format for display
         project_metrics = {
@@ -459,7 +506,7 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
             'total_variance_cents': variance_cents,
             'total_variance_display': cents_to_display(variance_cents) if variance_cents is not None else 'N/A',
             'variance_pct': round(variance_cents / total_gmp_cents * 100, 1) if total_gmp_cents > 0 and variance_cents is not None else None,
-            'pct_complete': dashboard_summary['progress_pct'],
+            'pct_complete': progress_pct,
             'overall_cpi': dashboard_summary['cpi'],
             'schedule_variance': total_schedule_variance,
             'schedule_variance_pct': total_schedule_variance_pct,
