@@ -378,6 +378,7 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         total_actual_from_rows = sum((r.get('actual_west_raw', 0) + r.get('actual_east_raw', 0)) for r in recon_rows)
         total_eac_from_rows = sum(r.get('eac_total_raw', 0) for r in recon_rows)
         logger.info(f"Dashboard metrics debug:")
+        logger.info(f"  Recon rows count: {len(recon_rows)}")
         logger.info(f"  GMP from entity table: {dashboard_summary['total_gmp_budget_cents']}")
         logger.info(f"  GMP from recon rows: {total_gmp_from_rows}")
         logger.info(f"  Actual from entity table: {dashboard_summary['actual_costs_cents']}")
@@ -385,6 +386,11 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         logger.info(f"  EAC from entity table: {dashboard_summary['eac_cents']}")
         logger.info(f"  EAC from recon rows: {total_eac_from_rows}")
         logger.info(f"  Forecast remaining: {dashboard_summary['forecast_remaining_cents']}")
+        # Log first row to debug field names
+        if recon_rows:
+            first_row = recon_rows[0]
+            logger.info(f"  First row keys: {list(first_row.keys())}")
+            logger.info(f"  First row sample: gmp_division={first_row.get('gmp_division')}, gmp_amount_raw={first_row.get('gmp_amount_raw')}, actual_west_raw={first_row.get('actual_west_raw')}, actual_east_raw={first_row.get('actual_east_raw')}, eac_total_raw={first_row.get('eac_total_raw')}")
 
         # Get schedule variances for per-division display
         schedule_variances = get_schedule_variances()
@@ -458,6 +464,11 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
 
         # Sort by variance (worst first)
         division_cards.sort(key=lambda x: x['variance_cents'])
+
+        # Log division cards for debugging
+        logger.info(f"Division cards count: {len(division_cards)}")
+        if division_cards:
+            logger.info(f"First card: {division_cards[0]}")
 
         # Count health statuses
         health_counts = {
