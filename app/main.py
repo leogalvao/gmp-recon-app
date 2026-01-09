@@ -398,6 +398,17 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         total_schedule_variance = total_schedule_spent - total_schedule_expected
         total_schedule_variance_pct = round(total_schedule_variance / total_schedule_expected * 100, 1) if total_schedule_expected > 0 else 0
 
+        # Compute totals directly from recon_rows (authoritative source from reconciliation)
+        # This ensures dashboard totals match the GMP reconciliation page
+        total_gmp_from_recon = sum(row.get('gmp_amount_raw', 0) or 0 for row in recon_rows)
+        total_actual_from_recon = sum(
+            (row.get('actual_west_raw', 0) or 0) + (row.get('actual_east_raw', 0) or 0)
+            for row in recon_rows
+        )
+        total_eac_from_recon = sum(row.get('eac_total_raw', 0) or 0 for row in recon_rows)
+
+        logger.info(f"Recon totals - GMP: {total_gmp_from_recon}, Actual: {total_actual_from_recon}, EAC: {total_eac_from_recon}")
+
         # Build division cards with health status
         division_cards = []
         for row in recon_rows:
@@ -405,13 +416,13 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
             # Use raw cents values from format_for_display output
             gmp_cents = row.get('gmp_amount_raw', 0) or 0
             actual_cents = (row.get('actual_west_raw', 0) or 0) + (row.get('actual_east_raw', 0) or 0)
+            # Use EAC from reconciliation data (not forecast_rollup)
+            eac_cents = row.get('eac_total_raw', 0) or 0
             # Calculate variance as GMP - EAC
-            eac_row_cents = row.get('eac_total_raw', 0) or 0
-            variance_cents = gmp_cents - eac_row_cents
+            variance_cents = gmp_cents - eac_cents
 
-            # Get forecast data for this division
+            # Get forecast CPI for health status
             div_forecast = next((d for d in forecast_rollup.get('by_division', []) if d['gmp_division'] == gmp_div), {})
-            eac_cents = div_forecast.get('eac_cents', actual_cents) or actual_cents
             cpi = div_forecast.get('cpi')
 
             # Get schedule variance
@@ -458,33 +469,16 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         # Get mapping stats
         mapping_stats = result.get('mapping_stats', {})
 
-        # Compute totals from division cards (derived from recon_df)
-        # This is more reliable than the entity table which may be empty
-        total_gmp_from_recon = sum(d['gmp_cents'] for d in division_cards)
-        total_actual_from_recon = sum(d['actual_cents'] for d in division_cards)
-        total_eac_from_recon = sum(d.get('eac_cents', 0) for d in division_cards)
+        # Use reconciliation data as the primary source (matches GMP page)
+        # Only fall back to dashboard_summary if recon data is unavailable
+        total_gmp_cents = total_gmp_from_recon if total_gmp_from_recon > 0 else dashboard_summary['total_gmp_budget_cents']
+        actual_cents_total = total_actual_from_recon if total_actual_from_recon > 0 else dashboard_summary['actual_costs_cents']
+        eac_cents_total = total_eac_from_recon if total_eac_from_recon > 0 else dashboard_summary['eac_cents']
 
-        # Use dashboard_summary values if available, otherwise fall back to recon data
-        total_gmp_cents = dashboard_summary['total_gmp_budget_cents']
-        if total_gmp_cents == 0 and total_gmp_from_recon > 0:
-            # Entity table is empty but we have data from CSV/recon
-            total_gmp_cents = total_gmp_from_recon
-            if "GMP Budget data unavailable or zero" not in dashboard_summary['warnings']:
-                dashboard_summary['warnings'] = [w for w in dashboard_summary['warnings']
-                                                 if w != "GMP Budget data unavailable or zero"]
-
-        actual_cents_total = dashboard_summary['actual_costs_cents']
-        if actual_cents_total == 0 and total_actual_from_recon > 0:
-            # Use recon data for actuals
-            actual_cents_total = total_actual_from_recon
-
-        # EAC = Actual + Forecast Remaining (NOT commitments as fallback)
-        # If entity tables are empty, compute from recon data
-        eac_cents_total = dashboard_summary['eac_cents']
-        if dashboard_summary['actual_costs_cents'] == 0 and dashboard_summary['forecast_remaining_cents'] == 0:
-            # When there are no actuals and no forecast, EAC should be 0 (not budget!)
-            # Use the sum of EAC from division cards (which comes from compute_reconciliation)
-            eac_cents_total = total_eac_from_recon
+        # Remove stale warning if we have data from recon
+        if total_gmp_cents > 0 and "GMP Budget data unavailable or zero" in dashboard_summary.get('warnings', []):
+            dashboard_summary['warnings'] = [w for w in dashboard_summary['warnings']
+                                             if w != "GMP Budget data unavailable or zero"]
 
         # Variance = Budget - EAC (positive = underrun, negative = overrun)
         variance_cents = total_gmp_cents - eac_cents_total if total_gmp_cents > 0 else None
