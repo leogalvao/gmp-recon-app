@@ -273,7 +273,7 @@ class TestComputeDashboardSummary:
         result = compute_dashboard_summary(db_session)
 
         assert result['variance_cents'] is None
-        assert 'GMP Budget data unavailable' in result['warnings']
+        assert 'GMP Budget data unavailable or zero' in result['warnings']
 
     def test_cpi_returns_none_without_ev(self, db_session):
         """
@@ -335,7 +335,7 @@ class TestComputeDashboardSummary:
         result = compute_dashboard_summary(db_session)
 
         assert len(result['warnings']) > 0
-        assert 'GMP Budget data unavailable' in result['warnings']
+        assert 'GMP Budget data unavailable or zero' in result['warnings']
         assert 'Forecast data unavailable' in result['warnings']
 
 
