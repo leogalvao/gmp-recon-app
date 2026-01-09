@@ -1,44 +1,45 @@
 # GMP Reconciliation App Dependencies
+
 # Web Framework
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-jinja2>=3.1.2
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+jinja2>=3.1.6
 
 # Data Processing
-pandas>=2.0.0
-numpy>=1.24.0
+pandas>=2.1.0
+numpy>=1.26.0
 openpyxl>=3.1.0  # For Excel file reading
 
 # Machine Learning
-scikit-learn>=1.3.0
-torch>=2.0.0  # Optional: for MLP model
-tensorflow>=2.15.0  # For LSTM/Transformer forecasting
-mlflow>=2.8.0  # Experiment tracking
+scikit-learn>=1.4.0
+tensorflow>=2.17.0  # For LSTM/Transformer forecasting
+# Note: torch is optional - install separately if MLP model needed
+# Note: mlflow removed - was not used in codebase
 
 # CLI
 click>=8.0.0
 
 # Database
-sqlalchemy>=2.0.0
+sqlalchemy>=2.0.20
 
 # Scheduling
-apscheduler>=3.10.0
+apscheduler>=3.10.4
 
 # String Matching
-rapidfuzz>=3.0.0
+rapidfuzz>=3.6.0
 
 # Date Handling
 python-dateutil>=2.8.0
 
-# Form Data
-python-multipart>=0.0.6
+# Form Data (security fix: CVE-2024-53981)
+python-multipart>=0.0.18
 
 # Validation
-pydantic>=2.0.0
+pydantic>=2.5.0
 
 # Configuration
-pyyaml>=6.0.0
+pyyaml>=6.0.1
 
-# Testing
-httpx>=0.25.0
-pytest>=7.0.0
+# Testing (consider moving to requirements-dev.txt)
+httpx>=0.26.0
+pytest>=8.0.0
