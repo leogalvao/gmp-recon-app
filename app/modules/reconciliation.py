@@ -379,6 +379,9 @@ def compute_reconciliation(
     result['committed_remaining_east'] = np.maximum(0, result['committed_east_cents'] - result['actual_east_cents'])
     
     # Compute EAC (Forecast)
+    # IMPORTANT: EAC = Actual + Forecast Remaining
+    # When there are no actuals and no predictions, EAC should be 0, NOT budget
+    # Commitments should only inflate EAC when there are meaningful actuals
     if forecast_basis == 'actuals_only':
         result['forecast_west_cents'] = result['actual_west_cents'] + result['predicted_remaining_west']
         result['forecast_east_cents'] = result['actual_east_cents'] + result['predicted_remaining_east']
@@ -387,10 +390,27 @@ def compute_reconciliation(
         eac_model_east = result['actual_east_cents'] + result['predicted_remaining_east']
         eac_commit_west = result['actual_west_cents'] + result['committed_remaining_west']
         eac_commit_east = result['actual_east_cents'] + result['committed_remaining_east']
-        
+
         if eac_mode == 'max':
-            result['forecast_west_cents'] = np.maximum(eac_model_west, eac_commit_west)
-            result['forecast_east_cents'] = np.maximum(eac_model_east, eac_commit_east)
+            # Only use commitment-based EAC when there are actual costs
+            # This prevents EAC from defaulting to budget when actuals = 0
+            has_actuals_west = result['actual_west_cents'] > 0
+            has_actuals_east = result['actual_east_cents'] > 0
+            has_predictions_west = result['predicted_remaining_west'] > 0
+            has_predictions_east = result['predicted_remaining_east'] > 0
+
+            # Use max(model, commit) only when there are actuals or predictions
+            # Otherwise, just use the model forecast (actual + predicted)
+            result['forecast_west_cents'] = np.where(
+                has_actuals_west | has_predictions_west,
+                np.maximum(eac_model_west, eac_commit_west),
+                eac_model_west
+            )
+            result['forecast_east_cents'] = np.where(
+                has_actuals_east | has_predictions_east,
+                np.maximum(eac_model_east, eac_commit_east),
+                eac_model_east
+            )
         elif eac_mode == 'model':
             result['forecast_west_cents'] = eac_model_west
             result['forecast_east_cents'] = eac_model_east

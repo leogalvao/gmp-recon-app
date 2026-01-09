@@ -373,6 +373,25 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         result = run_full_reconciliation(db)
         recon_rows = result['recon_rows']
 
+        # Diagnostic logging for dashboard metrics
+        total_gmp_from_rows = sum(r.get('gmp_amount_raw', 0) for r in recon_rows)
+        total_actual_from_rows = sum((r.get('actual_west_raw', 0) + r.get('actual_east_raw', 0)) for r in recon_rows)
+        total_eac_from_rows = sum(r.get('eac_total_raw', 0) for r in recon_rows)
+        logger.info(f"Dashboard metrics debug:")
+        logger.info(f"  Recon rows count: {len(recon_rows)}")
+        logger.info(f"  GMP from entity table: {dashboard_summary['total_gmp_budget_cents']}")
+        logger.info(f"  GMP from recon rows: {total_gmp_from_rows}")
+        logger.info(f"  Actual from entity table: {dashboard_summary['actual_costs_cents']}")
+        logger.info(f"  Actual from recon rows: {total_actual_from_rows}")
+        logger.info(f"  EAC from entity table: {dashboard_summary['eac_cents']}")
+        logger.info(f"  EAC from recon rows: {total_eac_from_rows}")
+        logger.info(f"  Forecast remaining: {dashboard_summary['forecast_remaining_cents']}")
+        # Log first row to debug field names
+        if recon_rows:
+            first_row = recon_rows[0]
+            logger.info(f"  First row keys: {list(first_row.keys())}")
+            logger.info(f"  First row sample: gmp_division={first_row.get('gmp_division')}, gmp_amount_raw={first_row.get('gmp_amount_raw')}, actual_west_raw={first_row.get('actual_west_raw')}, actual_east_raw={first_row.get('actual_east_raw')}, eac_total_raw={first_row.get('eac_total_raw')}")
+
         # Get schedule variances for per-division display
         schedule_variances = get_schedule_variances()
 
@@ -385,17 +404,35 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         total_schedule_variance = total_schedule_spent - total_schedule_expected
         total_schedule_variance_pct = round(total_schedule_variance / total_schedule_expected * 100, 1) if total_schedule_expected > 0 else 0
 
+        # Compute totals directly from recon_rows (authoritative source from reconciliation)
+        # This ensures dashboard totals match the GMP reconciliation page
+        total_gmp_from_recon = sum(row.get('gmp_amount_raw', 0) or 0 for row in recon_rows)
+        total_actual_from_recon = sum(
+            (row.get('actual_west_raw', 0) or 0) + (row.get('actual_east_raw', 0) or 0)
+            for row in recon_rows
+        )
+        total_eac_from_recon = sum(row.get('eac_total_raw', 0) or 0 for row in recon_rows)
+
+        logger.info(f"Recon totals - GMP: {total_gmp_from_recon}, Actual: {total_actual_from_recon}, EAC: {total_eac_from_recon}")
+
         # Build division cards with health status
+        # Use pre-formatted values from format_for_display where available
         division_cards = []
         for row in recon_rows:
             gmp_div = row['gmp_division']
-            gmp_cents = row.get('gmp_amount_cents', 0) or 0
-            actual_cents = row.get('actual_total_cents', 0) or 0
-            variance_cents = row.get('variance_cents', 0) or 0
 
-            # Get forecast data for this division
+            # Get raw cents values (convert to int to handle numpy types)
+            gmp_cents = int(row.get('gmp_amount_raw', 0) or 0)
+            actual_west = int(row.get('actual_west_raw', 0) or 0)
+            actual_east = int(row.get('actual_east_raw', 0) or 0)
+            actual_cents = actual_west + actual_east
+            eac_cents = int(row.get('eac_total_raw', 0) or 0)
+
+            # Calculate variance as GMP - EAC
+            variance_cents = gmp_cents - eac_cents
+
+            # Get forecast CPI for health status
             div_forecast = next((d for d in forecast_rollup.get('by_division', []) if d['gmp_division'] == gmp_div), {})
-            eac_cents = div_forecast.get('eac_cents', actual_cents) or actual_cents
             cpi = div_forecast.get('cpi')
 
             # Get schedule variance
@@ -412,16 +449,17 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
             else:
                 health = 'healthy'
 
+            # Use pre-formatted display values from row, or format raw values
             division_cards.append({
                 'name': gmp_div,
                 'gmp_cents': gmp_cents,
-                'gmp_display': cents_to_display(gmp_cents),
+                'gmp_display': row.get('gmp_amount') or cents_to_display(gmp_cents),
                 'actual_cents': actual_cents,
-                'actual_display': cents_to_display(actual_cents),
+                'actual_display': row.get('actual_total') or cents_to_display(actual_cents),
                 'eac_cents': eac_cents,
-                'eac_display': cents_to_display(eac_cents),
+                'eac_display': row.get('eac_total') or cents_to_display(eac_cents),
                 'variance_cents': variance_cents,
-                'variance_display': cents_to_display(variance_cents),
+                'variance_display': row.get('surplus_or_overrun') or cents_to_display(variance_cents),
                 'pct_spent': pct_spent,
                 'cpi': cpi,
                 'health': health,
@@ -431,6 +469,11 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
 
         # Sort by variance (worst first)
         division_cards.sort(key=lambda x: x['variance_cents'])
+
+        # Log division cards for debugging
+        logger.info(f"Division cards count: {len(division_cards)}")
+        if division_cards:
+            logger.info(f"First card: {division_cards[0]}")
 
         # Count health statuses
         health_counts = {
@@ -442,11 +485,25 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         # Get mapping stats
         mapping_stats = result.get('mapping_stats', {})
 
-        # Build project_metrics from dashboard_summary (single source of truth)
-        total_gmp_cents = dashboard_summary['total_gmp_budget_cents']
-        actual_cents_total = dashboard_summary['actual_costs_cents']
-        eac_cents_total = dashboard_summary['eac_cents']
-        variance_cents = dashboard_summary['variance_cents']
+        # Use reconciliation data as the primary source (matches GMP page)
+        # Only fall back to dashboard_summary if recon data is unavailable
+        total_gmp_cents = total_gmp_from_recon if total_gmp_from_recon > 0 else dashboard_summary['total_gmp_budget_cents']
+        actual_cents_total = total_actual_from_recon if total_actual_from_recon > 0 else dashboard_summary['actual_costs_cents']
+        eac_cents_total = total_eac_from_recon if total_eac_from_recon > 0 else dashboard_summary['eac_cents']
+
+        # Remove stale warning if we have data from recon
+        if total_gmp_cents > 0 and "GMP Budget data unavailable or zero" in dashboard_summary.get('warnings', []):
+            dashboard_summary['warnings'] = [w for w in dashboard_summary['warnings']
+                                             if w != "GMP Budget data unavailable or zero"]
+
+        # Variance = Budget - EAC (positive = underrun, negative = overrun)
+        variance_cents = total_gmp_cents - eac_cents_total if total_gmp_cents > 0 else None
+
+        # Progress = Actual / EAC
+        progress_pct = 0.0
+        if eac_cents_total > 0:
+            progress_pct = round((actual_cents_total / eac_cents_total) * 100, 1)
+            progress_pct = max(0.0, min(100.0, progress_pct))
 
         # Format for display
         project_metrics = {
@@ -459,7 +516,7 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
             'total_variance_cents': variance_cents,
             'total_variance_display': cents_to_display(variance_cents) if variance_cents is not None else 'N/A',
             'variance_pct': round(variance_cents / total_gmp_cents * 100, 1) if total_gmp_cents > 0 and variance_cents is not None else None,
-            'pct_complete': dashboard_summary['progress_pct'],
+            'pct_complete': progress_pct,
             'overall_cpi': dashboard_summary['cpi'],
             'schedule_variance': total_schedule_variance,
             'schedule_variance_pct': total_schedule_variance_pct,
