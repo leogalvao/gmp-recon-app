@@ -1,0 +1,367 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Project Overview{% endblock %}
+
+{% block extra_head %}
+<style>
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1.5rem;
+    }
+
+    .kpi-card {
+        background: white;
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        border: 1px solid #e5e7eb;
+    }
+
+    .kpi-card.highlight {
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        color: white;
+    }
+
+    .kpi-card.highlight .kpi-label {
+        color: rgba(255,255,255,0.8);
+    }
+
+    .kpi-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #6b7280;
+        margin-bottom: 0.5rem;
+    }
+
+    .kpi-value {
+        font-size: 1.875rem;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+
+    .kpi-sub {
+        font-size: 0.875rem;
+        color: #6b7280;
+        margin-top: 0.25rem;
+    }
+
+    .kpi-card.highlight .kpi-sub {
+        color: rgba(255,255,255,0.7);
+    }
+
+    .division-card {
+        background: white;
+        border-radius: 0.75rem;
+        padding: 1rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        border: 1px solid #e5e7eb;
+        transition: all 0.2s;
+        cursor: pointer;
+    }
+
+    .division-card:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        transform: translateY(-2px);
+    }
+
+    .division-card.healthy {
+        border-left: 4px solid #10b981;
+    }
+
+    .division-card.warning {
+        border-left: 4px solid #f59e0b;
+    }
+
+    .division-card.critical {
+        border-left: 4px solid #ef4444;
+    }
+
+    .health-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+
+    .health-badge.healthy {
+        background: #d1fae5;
+        color: #065f46;
+    }
+
+    .health-badge.warning {
+        background: #fef3c7;
+        color: #92400e;
+    }
+
+    .health-badge.critical {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+
+    .progress-bar {
+        height: 0.5rem;
+        background: #e5e7eb;
+        border-radius: 9999px;
+        overflow: hidden;
+    }
+
+    .progress-bar-fill {
+        height: 100%;
+        border-radius: 9999px;
+        transition: width 0.5s ease;
+    }
+
+    .quick-link {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1rem;
+        background: white;
+        border-radius: 0.5rem;
+        border: 1px solid #e5e7eb;
+        text-decoration: none;
+        color: #374151;
+        transition: all 0.2s;
+    }
+
+    .quick-link:hover {
+        background: #f3f4f6;
+        border-color: #3b82f6;
+        color: #3b82f6;
+    }
+
+    .quick-link svg {
+        width: 1.5rem;
+        height: 1.5rem;
+        color: #6b7280;
+    }
+
+    .quick-link:hover svg {
+        color: #3b82f6;
+    }
+
+    .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+    }
+
+    .section-title {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: #111827;
+    }
+
+    .status-dot {
+        width: 0.5rem;
+        height: 0.5rem;
+        border-radius: 9999px;
+        display: inline-block;
+    }
+
+    .status-dot.healthy { background: #10b981; }
+    .status-dot.warning { background: #f59e0b; }
+    .status-dot.critical { background: #ef4444; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-gray-50">
+    <!-- Header -->
+    <div class="bg-white border-b">
+        <div class="max-w-7xl mx-auto px-6 py-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-900">Project Dashboard</h1>
+                    <p class="text-gray-500 mt-1">Overview of all divisions and key metrics</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-sm text-gray-500">{{ division_count }} Divisions</span>
+                    <div class="flex items-center gap-2">
+                        <span class="status-dot healthy"></span>
+                        <span class="text-sm text-gray-600">{{ health_counts.healthy }}</span>
+                        <span class="status-dot warning"></span>
+                        <span class="text-sm text-gray-600">{{ health_counts.warning }}</span>
+                        <span class="status-dot critical"></span>
+                        <span class="text-sm text-gray-600">{{ health_counts.critical }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-7xl mx-auto px-6 py-8">
+        <!-- Key Metrics -->
+        <div class="dashboard-grid mb-8">
+            <!-- Total GMP Budget -->
+            <div class="kpi-card highlight">
+                <div class="kpi-label">Total GMP Budget</div>
+                <div class="kpi-value">{{ project_metrics.total_gmp_display }}</div>
+                <div class="kpi-sub">Guaranteed Maximum Price</div>
+            </div>
+
+            <!-- Actual Costs -->
+            <div class="kpi-card">
+                <div class="kpi-label">Actual Costs</div>
+                <div class="kpi-value">{{ project_metrics.total_actual_display }}</div>
+                <div class="kpi-sub">{{ project_metrics.pct_complete }}% of EAC spent</div>
+            </div>
+
+            <!-- EAC -->
+            <div class="kpi-card">
+                <div class="kpi-label">Estimate at Completion</div>
+                <div class="kpi-value">{{ project_metrics.total_eac_display }}</div>
+                <div class="kpi-sub">Forecasted final cost</div>
+            </div>
+
+            <!-- Variance -->
+            <div class="kpi-card">
+                <div class="kpi-label">Variance (Budget - EAC)</div>
+                <div class="kpi-value {% if project_metrics.total_variance_cents >= 0 %}text-green-600{% else %}text-red-600{% endif %}">
+                    {{ project_metrics.total_variance_display }}
+                </div>
+                <div class="kpi-sub">{{ project_metrics.variance_pct }}% of budget</div>
+            </div>
+
+            <!-- CPI -->
+            <div class="kpi-card">
+                <div class="kpi-label">Cost Performance Index</div>
+                <div class="kpi-value {% if project_metrics.overall_cpi and project_metrics.overall_cpi >= 1 %}text-green-600{% elif project_metrics.overall_cpi %}text-red-600{% endif %}">
+                    {{ project_metrics.overall_cpi if project_metrics.overall_cpi else 'N/A' }}
+                </div>
+                <div class="kpi-sub">{% if project_metrics.overall_cpi and project_metrics.overall_cpi >= 1 %}Under budget{% elif project_metrics.overall_cpi %}Over budget{% else %}Not calculated{% endif %}</div>
+            </div>
+
+            <!-- Schedule Variance -->
+            <div class="kpi-card">
+                <div class="kpi-label">Schedule Variance</div>
+                <div class="kpi-value {% if project_metrics.schedule_status == 'over' %}text-red-600{% elif project_metrics.schedule_status == 'under' %}text-green-600{% else %}text-gray-600{% endif %}">
+                    {% if project_metrics.schedule_variance >= 0 %}+{% endif %}{{ project_metrics.schedule_variance_pct }}%
+                </div>
+                <div class="kpi-sub">${{ '{:,.0f}'.format(project_metrics.schedule_variance) }} vs schedule</div>
+            </div>
+        </div>
+
+        <!-- Project Progress -->
+        <div class="bg-white rounded-xl p-6 shadow-sm border mb-8">
+            <div class="section-header">
+                <h2 class="section-title">Project Progress</h2>
+                <span class="text-sm text-gray-500">{{ project_metrics.pct_complete }}% Complete</span>
+            </div>
+            <div class="progress-bar h-3">
+                <div class="progress-bar-fill bg-blue-500" style="width: {{ project_metrics.pct_complete }}%"></div>
+            </div>
+            <div class="flex justify-between mt-2 text-sm text-gray-500">
+                <span>Actual: {{ project_metrics.total_actual_display }}</span>
+                <span>EAC: {{ project_metrics.total_eac_display }}</span>
+            </div>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="mb-8">
+            <h2 class="section-title mb-4">Quick Actions</h2>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <a href="/gmp" class="quick-link">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path>
+                    </svg>
+                    <div>
+                        <div class="font-medium">GMP Reconciliation</div>
+                        <div class="text-xs text-gray-500">View detailed breakdown</div>
+                    </div>
+                </a>
+                <a href="/forecast" class="quick-link">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                    </svg>
+                    <div>
+                        <div class="font-medium">Forecast</div>
+                        <div class="text-xs text-gray-500">View projections</div>
+                    </div>
+                </a>
+                <a href="/mappings" class="quick-link">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+                    </svg>
+                    <div>
+                        <div class="font-medium">Mappings</div>
+                        <div class="text-xs text-gray-500">{{ mapping_stats.get('direct_mapped', 0) }} / {{ mapping_stats.get('direct_total', 0) }} mapped</div>
+                    </div>
+                </a>
+                <a href="/data-health" class="quick-link">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <div>
+                        <div class="font-medium">Data Health</div>
+                        <div class="text-xs text-gray-500">Check data quality</div>
+                    </div>
+                </a>
+            </div>
+        </div>
+
+        <!-- Division Cards -->
+        <div class="section-header">
+            <h2 class="section-title">Divisions by Variance</h2>
+            <span class="text-sm text-gray-500">Sorted by variance (needs attention first)</span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {% for div in division_cards %}
+            <a href="/gmp/{{ div.name | urlencode }}/forecast" class="division-card {{ div.health }}">
+                <div class="flex items-start justify-between mb-3">
+                    <div>
+                        <h3 class="font-semibold text-gray-900">{{ div.name }}</h3>
+                        <span class="health-badge {{ div.health }}">
+                            {% if div.health == 'healthy' %}On Track
+                            {% elif div.health == 'warning' %}Attention
+                            {% else %}Critical{% endif %}
+                        </span>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-sm font-semibold {% if div.variance_cents >= 0 %}text-green-600{% else %}text-red-600{% endif %}">
+                            {{ div.variance_display }}
+                        </div>
+                        <div class="text-xs text-gray-500">variance</div>
+                    </div>
+                </div>
+
+                <div class="space-y-2">
+                    <div class="flex justify-between text-sm">
+                        <span class="text-gray-500">Budget</span>
+                        <span class="font-medium">{{ div.gmp_display }}</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-gray-500">Actual</span>
+                        <span class="font-medium">{{ div.actual_display }}</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-bar-fill {% if div.pct_spent > 90 %}bg-red-500{% elif div.pct_spent > 75 %}bg-yellow-500{% else %}bg-green-500{% endif %}"
+                             style="width: {{ [div.pct_spent, 100] | min }}%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500">
+                        <span>{{ div.pct_spent }}% spent</span>
+                        <span>CPI: {{ div.cpi if div.cpi else 'N/A' }}</span>
+                    </div>
+                </div>
+
+                {% if div.schedule_variance_pct != 0 %}
+                <div class="mt-3 pt-3 border-t flex justify-between items-center">
+                    <span class="text-xs text-gray-500">Schedule Var</span>
+                    <span class="text-sm font-medium {% if div.schedule_status == 'over' %}text-red-600{% elif div.schedule_status == 'under' %}text-green-600{% else %}text-gray-600{% endif %}">
+                        {% if div.schedule_variance_pct >= 0 %}+{% endif %}{{ div.schedule_variance_pct }}%
+                    </span>
+                </div>
+                {% endif %}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

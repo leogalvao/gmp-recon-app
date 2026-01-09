@@ -358,7 +358,125 @@ def run_full_reconciliation(db: Session, side_filter: Optional[str] = None) -> D
 
 @app.get("/", response_class=RedirectResponse)
 async def root():
-    return RedirectResponse(url="/gmp")
+    return RedirectResponse(url="/dashboard")
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page(request: Request, db: Session = Depends(get_db)):
+    """Project dashboard with overview metrics and division summaries."""
+    try:
+        # Get full reconciliation data
+        result = run_full_reconciliation(db)
+        recon_rows = result['recon_rows']
+        summary = result['summary']
+
+        # Get schedule variances
+        schedule_variances = get_schedule_variances()
+
+        # Get forecast rollup
+        forecast_rollup = compute_project_rollup(db)
+
+        # Calculate project-level metrics
+        total_gmp_cents = sum(row.get('gmp_amount_cents', 0) or 0 for row in recon_rows)
+        total_actual_cents = sum(row.get('actual_total_cents', 0) or 0 for row in recon_rows)
+        total_eac_cents = forecast_rollup.get('total_eac_cents', 0) or total_actual_cents
+        total_variance_cents = total_gmp_cents - total_eac_cents
+        overall_cpi = forecast_rollup.get('overall_cpi', 1.0)
+
+        # Calculate schedule variance totals
+        total_schedule_expected = sum(v.get('expected', 0) for v in schedule_variances.values())
+        total_schedule_spent = sum(v.get('spent', 0) for v in schedule_variances.values())
+        total_schedule_variance = total_schedule_spent - total_schedule_expected
+        total_schedule_variance_pct = round(total_schedule_variance / total_schedule_expected * 100, 1) if total_schedule_expected > 0 else 0
+
+        # Build division cards with health status
+        division_cards = []
+        for row in recon_rows:
+            gmp_div = row['gmp_division']
+            gmp_cents = row.get('gmp_amount_cents', 0) or 0
+            actual_cents = row.get('actual_total_cents', 0) or 0
+            variance_cents = row.get('variance_cents', 0) or 0
+
+            # Get forecast data for this division
+            div_forecast = next((d for d in forecast_rollup.get('by_division', []) if d['gmp_division'] == gmp_div), {})
+            eac_cents = div_forecast.get('eac_cents', actual_cents) or actual_cents
+            cpi = div_forecast.get('cpi', 1.0)
+
+            # Get schedule variance
+            sched_var = schedule_variances.get(gmp_div, {})
+
+            # Determine health status
+            pct_spent = round(actual_cents / gmp_cents * 100, 1) if gmp_cents > 0 else 0
+            if cpi and cpi < 0.9:
+                health = 'critical'
+            elif cpi and cpi < 0.95:
+                health = 'warning'
+            elif variance_cents < 0:
+                health = 'warning'
+            else:
+                health = 'healthy'
+
+            division_cards.append({
+                'name': gmp_div,
+                'gmp_cents': gmp_cents,
+                'gmp_display': cents_to_display(gmp_cents),
+                'actual_cents': actual_cents,
+                'actual_display': cents_to_display(actual_cents),
+                'eac_cents': eac_cents,
+                'eac_display': cents_to_display(eac_cents),
+                'variance_cents': variance_cents,
+                'variance_display': cents_to_display(variance_cents),
+                'pct_spent': pct_spent,
+                'cpi': cpi,
+                'health': health,
+                'schedule_variance_pct': sched_var.get('variance_pct', 0),
+                'schedule_status': sched_var.get('status', 'on_track')
+            })
+
+        # Sort by variance (worst first)
+        division_cards.sort(key=lambda x: x['variance_cents'])
+
+        # Count health statuses
+        health_counts = {
+            'healthy': len([d for d in division_cards if d['health'] == 'healthy']),
+            'warning': len([d for d in division_cards if d['health'] == 'warning']),
+            'critical': len([d for d in division_cards if d['health'] == 'critical'])
+        }
+
+        # Get mapping stats
+        mapping_stats = result.get('mapping_stats', {})
+
+        return templates.TemplateResponse("dashboard.html", {
+            "request": request,
+            "project_metrics": {
+                'total_gmp_cents': total_gmp_cents,
+                'total_gmp_display': cents_to_display(total_gmp_cents),
+                'total_actual_cents': total_actual_cents,
+                'total_actual_display': cents_to_display(total_actual_cents),
+                'total_eac_cents': total_eac_cents,
+                'total_eac_display': cents_to_display(total_eac_cents),
+                'total_variance_cents': total_variance_cents,
+                'total_variance_display': cents_to_display(total_variance_cents),
+                'variance_pct': round(total_variance_cents / total_gmp_cents * 100, 1) if total_gmp_cents else 0,
+                'pct_complete': round(total_actual_cents / total_eac_cents * 100, 1) if total_eac_cents else 0,
+                'overall_cpi': overall_cpi,
+                'schedule_variance': total_schedule_variance,
+                'schedule_variance_pct': total_schedule_variance_pct,
+                'schedule_status': 'over' if total_schedule_variance > 0 else 'under' if total_schedule_variance < 0 else 'on_track'
+            },
+            "division_cards": division_cards,
+            "health_counts": health_counts,
+            "mapping_stats": mapping_stats,
+            "division_count": len(division_cards),
+            "active_page": "dashboard"
+        })
+    except Exception as e:
+        logger.error(f"Dashboard error: {e}")
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "error": str(e),
+            "active_page": "dashboard"
+        })
 
 
 def get_schedule_variances() -> Dict[str, Dict]:
