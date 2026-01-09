@@ -57,13 +57,19 @@ def create_time_features(dates: pd.Series) -> pd.DataFrame:
     """
     Create time-based features from dates.
     Features: month, quarter, day_of_year, week_of_year
+
+    Uses .values to avoid pandas index alignment issues that can occur
+    when the input Series has a non-contiguous index (e.g., after filtering).
     """
-    df = pd.DataFrame()
-    df['month'] = dates.dt.month
-    df['quarter'] = dates.dt.quarter
-    df['day_of_year'] = dates.dt.dayofyear
-    df['week_of_year'] = dates.dt.isocalendar().week.astype(int)
-    df['year'] = dates.dt.year
+    # Create DataFrame with the original index for proper alignment during concat
+    df = pd.DataFrame(index=dates.index)
+    # Use .values to avoid index alignment issues with dt accessor methods
+    df['month'] = dates.dt.month.values
+    df['quarter'] = dates.dt.quarter.values
+    df['day_of_year'] = dates.dt.dayofyear.values
+    # isocalendar().week returns UInt32, convert to int using .values to avoid index issues
+    df['week_of_year'] = dates.dt.isocalendar().week.values.astype(int)
+    df['year'] = dates.dt.year.values
     return df
 
 
@@ -118,25 +124,30 @@ def prepare_features(
 ) -> Tuple[pd.DataFrame, Dict]:
     """
     Prepare feature matrix for ML training.
-    
+
     Features:
     - Time features: month, quarter, day_of_year
     - Rolling sums: 30/60/90-day windows
     - Lagged actuals: t-1, t-2 months
     - Budget ratio: current_budget / gmp_amount_total
-    
+
     Returns:
     - Feature DataFrame with target column
     - Feature metadata dictionary
     """
+    # Reset index at the start to ensure clean boolean indexing operations
+    # This prevents "Unalignable boolean Series" errors when input has non-contiguous index
+    df = direct_costs_df.copy().reset_index(drop=True)
+
     # Filter to as_of_date
     if as_of_date:
-        df = direct_costs_df[direct_costs_df['date_parsed'] <= as_of_date].copy()
-    else:
-        df = direct_costs_df.copy()
-    
-    # Exclude flagged duplicates
-    df = df[df['excluded_from_actuals'] == False]
+        # Use .values for boolean mask to avoid index alignment issues
+        mask = (df['date_parsed'] <= as_of_date).values
+        df = df[mask].copy().reset_index(drop=True)
+
+    # Exclude flagged duplicates - use .values to avoid index alignment issues
+    mask = (df['excluded_from_actuals'] == False).values
+    df = df[mask].reset_index(drop=True)
     
     if len(df) == 0:
         return pd.DataFrame(), {}
