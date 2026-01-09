@@ -220,6 +220,73 @@
         </div>
         {% endif %}
 
+        <!-- Health Summary Panel -->
+        <div class="bg-white rounded-xl p-6 shadow-sm border mb-8">
+            <div class="section-header">
+                <h2 class="section-title flex items-center gap-2">
+                    <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                    </svg>
+                    System Health
+                </h2>
+                <span id="lastTrainedTimestamp" class="text-sm text-gray-500">Loading...</span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+                <!-- Model Status -->
+                <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500 uppercase tracking-wide">Model Status</div>
+                        <div id="modelStatus" class="font-semibold text-gray-900">Active</div>
+                    </div>
+                </div>
+
+                <!-- Data Quality -->
+                <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500 uppercase tracking-wide">Data Quality</div>
+                        <div id="dataQuality" class="font-semibold text-gray-900">{{ mapping_stats.get('direct_mapped', 0) * 100 // (mapping_stats.get('direct_total', 1) or 1) }}% Mapped</div>
+                    </div>
+                </div>
+
+                <!-- Pending Reviews -->
+                <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <div class="w-10 h-10 rounded-full bg-yellow-100 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500 uppercase tracking-wide">Pending Reviews</div>
+                        <div id="pendingReviews" class="font-semibold text-gray-900">{{ health_counts.warning + health_counts.critical }}</div>
+                    </div>
+                </div>
+
+                <!-- Model Version -->
+                <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <div class="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="text-xs text-gray-500 uppercase tracking-wide">Model Version</div>
+                        <div id="modelVersion" class="font-semibold text-gray-900">v2.1.0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Key Metrics -->
         <div class="dashboard-grid mb-8">
             <!-- Total GMP Budget -->
@@ -437,6 +504,64 @@
 {% block extra_scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Fetch training status for health panel
+    async function loadTrainingStatus() {
+        try {
+            const response = await fetch('/api/projects/1/training-rounds?limit=1');
+            if (response.ok) {
+                const data = await response.json();
+                const timestampEl = document.getElementById('lastTrainedTimestamp');
+                const statusEl = document.getElementById('modelStatus');
+
+                if (data.rounds && data.rounds.length > 0) {
+                    const lastRound = data.rounds[0];
+                    const date = new Date(lastRound.completed_at || lastRound.created_at);
+                    const timeAgo = getTimeAgo(date);
+                    timestampEl.textContent = `Last trained: ${timeAgo}`;
+
+                    if (lastRound.status === 'completed') {
+                        statusEl.textContent = 'Active';
+                        statusEl.className = 'font-semibold text-green-600';
+                    } else if (lastRound.status === 'in_progress') {
+                        statusEl.textContent = 'Training...';
+                        statusEl.className = 'font-semibold text-yellow-600';
+                    } else {
+                        statusEl.textContent = lastRound.status || 'Unknown';
+                    }
+                } else {
+                    timestampEl.textContent = 'Not yet trained';
+                    statusEl.textContent = 'Not Trained';
+                    statusEl.className = 'font-semibold text-gray-500';
+                }
+            }
+        } catch (error) {
+            console.log('Training status not available:', error);
+            document.getElementById('lastTrainedTimestamp').textContent = 'Status unavailable';
+        }
+    }
+
+    function getTimeAgo(date) {
+        const seconds = Math.floor((new Date() - date) / 1000);
+        const intervals = [
+            { label: 'year', seconds: 31536000 },
+            { label: 'month', seconds: 2592000 },
+            { label: 'week', seconds: 604800 },
+            { label: 'day', seconds: 86400 },
+            { label: 'hour', seconds: 3600 },
+            { label: 'minute', seconds: 60 }
+        ];
+
+        for (const interval of intervals) {
+            const count = Math.floor(seconds / interval.seconds);
+            if (count >= 1) {
+                return `${count} ${interval.label}${count > 1 ? 's' : ''} ago`;
+            }
+        }
+        return 'Just now';
+    }
+
+    loadTrainingStatus();
+
     const ctx = document.getElementById('budgetActualChart');
     if (!ctx) return;
 

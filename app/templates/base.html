@@ -123,12 +123,192 @@
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
+
+        /* Global Toast Notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            pointer-events: none;
+        }
+
+        .toast {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.875rem 1.25rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transform: translateX(120%);
+            transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+            pointer-events: auto;
+            max-width: 400px;
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.hiding {
+            opacity: 0;
+            transform: translateX(120%);
+        }
+
+        .toast-success {
+            background: #22C55E;
+            color: white;
+        }
+
+        .toast-error {
+            background: #EF4444;
+            color: white;
+        }
+
+        .toast-warning {
+            background: #FACC15;
+            color: #422006;
+        }
+
+        .toast-info {
+            background: #3B82F6;
+            color: white;
+        }
+
+        .toast-icon {
+            flex-shrink: 0;
+            width: 1.25rem;
+            height: 1.25rem;
+        }
+
+        .toast-message {
+            flex: 1;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .toast-close {
+            flex-shrink: 0;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            opacity: 0.7;
+            padding: 0.25rem;
+            color: inherit;
+        }
+
+        .toast-close:hover {
+            opacity: 1;
+        }
+
+        /* Inline Status Card */
+        .status-card {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid;
+            margin-bottom: 1rem;
+        }
+
+        .status-card-pending {
+            background: #FEF3C7;
+            border-color: #F59E0B;
+            color: #92400E;
+        }
+
+        .status-card-success {
+            background: #D1FAE5;
+            border-color: #10B981;
+            color: #065F46;
+        }
+
+        .status-card-error {
+            background: #FEE2E2;
+            border-color: #EF4444;
+            color: #991B1B;
+        }
+
+        /* Collapsible error log */
+        .error-log-container {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+
+        .error-log-container.expanded {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        /* Button loading state */
+        .btn-loading {
+            position: relative;
+            pointer-events: none;
+        }
+
+        .btn-loading .btn-text {
+            visibility: hidden;
+        }
+
+        .btn-loading::after {
+            content: '';
+            position: absolute;
+            width: 1rem;
+            height: 1rem;
+            top: 50%;
+            left: 50%;
+            margin-left: -0.5rem;
+            margin-top: -0.5rem;
+            border: 2px solid currentColor;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.8s linear infinite;
+        }
+
+        /* Skip to content link for accessibility */
+        .skip-link {
+            position: absolute;
+            top: -40px;
+            left: 0;
+            background: #3B82F6;
+            color: white;
+            padding: 0.5rem 1rem;
+            z-index: 100;
+            transition: top 0.3s;
+        }
+
+        .skip-link:focus {
+            top: 0;
+        }
+
+        /* Keyboard shortcut hints */
+        .kbd {
+            display: inline-block;
+            padding: 0.125rem 0.375rem;
+            font-size: 0.75rem;
+            font-family: ui-monospace, monospace;
+            background: #F3F4F6;
+            border: 1px solid #D1D5DB;
+            border-radius: 0.25rem;
+            box-shadow: 0 1px 0 #D1D5DB;
+        }
     </style>
     {% block extra_head %}{% endblock %}
 </head>
 <body class="bg-gray-100 min-h-screen">
+    <!-- Skip to main content link for accessibility -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- ARIA Live Region for screen reader announcements -->
+    <div id="aria-live-region" class="sr-only" aria-live="polite" aria-atomic="true" style="position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden;"></div>
+
+    <!-- Global Toast Container -->
+    <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-label="Notifications"></div>
+
     <!-- Navigation -->
-    <nav class="bg-white shadow-sm sticky top-0 z-50">
+    <nav class="bg-white shadow-sm sticky top-0 z-50" role="navigation" aria-label="Main navigation">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
                 <div class="flex items-center">
@@ -209,7 +389,7 @@
     </nav>
     
     <!-- Main Content -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <main id="main-content" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" role="main">
         {% block content %}{% endblock %}
     </main>
     
@@ -256,6 +436,220 @@
 
         // Store CSRF token for forms (fallback)
         window.CSRF_TOKEN = getCsrfToken();
+
+        // =============================================
+        // Global Toast Notification System
+        // =============================================
+        const ToastIcons = {
+            success: '<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>',
+            error: '<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>',
+            warning: '<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>',
+            info: '<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
+        };
+
+        /**
+         * Show a toast notification
+         * @param {string} message - The message to display
+         * @param {string} type - Type of toast: 'success', 'error', 'warning', 'info'
+         * @param {number} duration - Duration in milliseconds (default: 4000)
+         * @returns {HTMLElement} The toast element
+         */
+        function showToast(message, type = 'info', duration = 4000) {
+            const container = document.getElementById('toast-container');
+            if (!container) return null;
+
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.setAttribute('role', 'alert');
+            toast.setAttribute('aria-live', 'assertive');
+
+            toast.innerHTML = `
+                ${ToastIcons[type] || ToastIcons.info}
+                <span class="toast-message">${escapeHtml(message)}</span>
+                <button class="toast-close" aria-label="Dismiss notification" onclick="dismissToast(this.parentElement)">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            `;
+
+            container.appendChild(toast);
+
+            // Announce to screen readers
+            announceToScreenReader(message);
+
+            // Trigger animation
+            requestAnimationFrame(() => {
+                toast.classList.add('show');
+            });
+
+            // Auto dismiss
+            if (duration > 0) {
+                setTimeout(() => dismissToast(toast), duration);
+            }
+
+            return toast;
+        }
+
+        /**
+         * Dismiss a toast notification
+         * @param {HTMLElement} toast - The toast element to dismiss
+         */
+        function dismissToast(toast) {
+            if (!toast || toast.classList.contains('hiding')) return;
+
+            toast.classList.add('hiding');
+            setTimeout(() => {
+                if (toast.parentElement) {
+                    toast.parentElement.removeChild(toast);
+                }
+            }, 300);
+        }
+
+        /**
+         * Announce a message to screen readers
+         * @param {string} message - The message to announce
+         */
+        function announceToScreenReader(message) {
+            const liveRegion = document.getElementById('aria-live-region');
+            if (liveRegion) {
+                liveRegion.textContent = message;
+                // Clear after a delay to allow re-announcement of same message
+                setTimeout(() => { liveRegion.textContent = ''; }, 1000);
+            }
+        }
+
+        /**
+         * Escape HTML to prevent XSS
+         * @param {string} str - String to escape
+         * @returns {string} Escaped string
+         */
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // =============================================
+        // Keyboard Shortcuts
+        // =============================================
+        const keyboardShortcuts = {
+            'KeyT': { description: 'Toggle training (on Forecast page)', handler: null },
+            'KeyR': { description: 'Refresh data', handler: null },
+            'Slash': { description: 'Focus search', handler: focusSearch },
+            'Escape': { description: 'Close modal/dialog', handler: closeActiveModal }
+        };
+
+        function focusSearch() {
+            const searchInputs = document.querySelectorAll('input[type="text"][placeholder*="Search"], input[type="search"]');
+            if (searchInputs.length > 0) {
+                searchInputs[0].focus();
+                return true;
+            }
+            return false;
+        }
+
+        function closeActiveModal() {
+            // Try to find and close any open modal
+            const modals = document.querySelectorAll('[id*="modal"]:not(.hidden), [id*="Modal"]:not(.hidden)');
+            modals.forEach(modal => {
+                if (!modal.classList.contains('hidden') && modal.style.display !== 'none') {
+                    modal.classList.add('hidden');
+                }
+            });
+        }
+
+        // Global keyboard shortcut listener
+        document.addEventListener('keydown', function(e) {
+            // Don't trigger shortcuts when typing in inputs
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+                // But allow Escape to work
+                if (e.code !== 'Escape') return;
+            }
+
+            const shortcut = keyboardShortcuts[e.code];
+            if (shortcut && shortcut.handler && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                if (shortcut.handler()) {
+                    e.preventDefault();
+                }
+            }
+        });
+
+        // Allow pages to register custom shortcuts
+        window.registerKeyboardShortcut = function(code, description, handler) {
+            keyboardShortcuts[code] = { description, handler };
+        };
+
+        // =============================================
+        // Button Loading State Helpers
+        // =============================================
+        /**
+         * Set a button to loading state
+         * @param {HTMLElement|string} btn - Button element or selector
+         * @param {string} loadingText - Text to show while loading
+         */
+        function setButtonLoading(btn, loadingText = 'Loading...') {
+            if (typeof btn === 'string') {
+                btn = document.querySelector(btn);
+            }
+            if (!btn) return;
+
+            btn._originalContent = btn.innerHTML;
+            btn._originalDisabled = btn.disabled;
+            btn.disabled = true;
+            btn.innerHTML = `
+                <svg class="w-4 h-4 inline mr-1 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                ${escapeHtml(loadingText)}
+            `;
+        }
+
+        /**
+         * Reset a button from loading state
+         * @param {HTMLElement|string} btn - Button element or selector
+         */
+        function resetButtonLoading(btn) {
+            if (typeof btn === 'string') {
+                btn = document.querySelector(btn);
+            }
+            if (!btn || btn._originalContent === undefined) return;
+
+            btn.innerHTML = btn._originalContent;
+            btn.disabled = btn._originalDisabled;
+            delete btn._originalContent;
+            delete btn._originalDisabled;
+        }
+
+        // =============================================
+        // Debounce Utility
+        // =============================================
+        /**
+         * Debounce a function
+         * @param {Function} func - Function to debounce
+         * @param {number} wait - Wait time in milliseconds
+         * @returns {Function} Debounced function
+         */
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        // Make utilities globally available
+        window.showToast = showToast;
+        window.dismissToast = dismissToast;
+        window.announceToScreenReader = announceToScreenReader;
+        window.setButtonLoading = setButtonLoading;
+        window.resetButtonLoading = resetButtonLoading;
+        window.debounce = debounce;
     </script>
 
     <!-- Footer -->

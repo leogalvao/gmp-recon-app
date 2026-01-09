@@ -11,14 +11,50 @@
             <p class="text-gray-600 mt-1">Review and resolve suspected duplicate direct cost entries</p>
         </div>
         <div class="flex space-x-3">
-            <form action="/recompute" method="POST">
-                <button type="submit" class="btn btn-secondary">
-                    <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <button type="button" onclick="rerunDetection()" class="btn btn-secondary" id="rerunBtn">
+                <span class="btn-text flex items-center">
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                     </svg>
                     Re-detect Duplicates
-                </button>
-            </form>
+                </span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Confidence Filter -->
+    <div class="card mt-4">
+        <div class="flex flex-wrap items-center gap-6">
+            <div class="flex items-center gap-3 flex-1 min-w-[300px]">
+                <label for="confidenceSlider" class="text-sm font-medium text-gray-700 whitespace-nowrap">
+                    Min Confidence:
+                </label>
+                <input type="range" id="confidenceSlider" min="60" max="100" value="60"
+                       class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                       oninput="updateConfidenceFilter(this.value)"
+                       aria-describedby="confidenceValue">
+                <span id="confidenceValue" class="text-sm font-semibold text-blue-600 w-12 text-right">60%</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <label for="methodFilter" class="text-sm font-medium text-gray-700">Method:</label>
+                <select id="methodFilter" onchange="applyFilters()" class="border rounded-lg px-3 py-2 text-sm">
+                    <option value="">All Methods</option>
+                    <option value="exact">Exact Match</option>
+                    <option value="fuzzy">Fuzzy Match</option>
+                    <option value="reversal">Reversal</option>
+                </select>
+            </div>
+            <div class="flex items-center gap-3">
+                <label for="statusFilter" class="text-sm font-medium text-gray-700">Status:</label>
+                <select id="statusFilter" onchange="applyFilters()" class="border rounded-lg px-3 py-2 text-sm">
+                    <option value="">All Status</option>
+                    <option value="auto">Auto-excluded</option>
+                    <option value="review">Needs Review</option>
+                </select>
+            </div>
+            <button type="button" onclick="resetFilters()" class="text-sm text-blue-600 hover:underline">
+                Reset Filters
+            </button>
         </div>
     </div>
     
@@ -225,16 +261,170 @@
 
 {% block extra_scripts %}
 <script>
+let duplicatesTable;
+
 $(document).ready(function() {
-    $('#duplicates-table').DataTable({
-        pageLength: 50,
-        order: [[0, 'asc']],
-        columnDefs: [
-            { orderable: false, targets: [9] }
-        ],
-        language: {
-            search: "Filter:",
-            lengthMenu: "Show _MENU_ entries"
+    // Initialize DataTable with validation
+    try {
+        duplicatesTable = $('#duplicates-table').DataTable({
+            pageLength: 50,
+            order: [[0, 'asc']],
+            columnDefs: [
+                { orderable: false, targets: [9] }
+            ],
+            language: {
+                search: "Filter:",
+                lengthMenu: "Show _MENU_ entries",
+                emptyTable: "No duplicates found matching your filters"
+            },
+            // DataTable column validation
+            initComplete: function(settings, json) {
+                const expectedColumns = 10;
+                const actualColumns = this.api().columns().header().length;
+                if (actualColumns !== expectedColumns) {
+                    console.warn(`DataTable column mismatch: expected ${expectedColumns}, got ${actualColumns}`);
+                    showToast(`Table configuration warning: column count mismatch`, 'warning');
+                }
+            },
+            // Error handling
+            error: function(xhr, error, code) {
+                console.error('DataTable error:', error, code);
+                showToast('Error loading table data', 'error');
+            }
+        });
+    } catch (e) {
+        console.error('DataTable initialization failed:', e);
+        showToast('Failed to initialize table', 'error');
+    }
+});
+
+// Confidence filter
+let minConfidence = 60;
+
+function updateConfidenceFilter(value) {
+    minConfidence = parseInt(value);
+    document.getElementById('confidenceValue').textContent = value + '%';
+    applyFilters();
+}
+
+// Apply all filters
+function applyFilters() {
+    if (!duplicatesTable) return;
+
+    const methodFilter = document.getElementById('methodFilter').value.toLowerCase();
+    const statusFilter = document.getElementById('statusFilter').value;
+
+    // Custom filtering function
+    $.fn.dataTable.ext.search.pop(); // Remove previous filter
+    $.fn.dataTable.ext.search.push(function(settings, data, dataIndex) {
+        const row = duplicatesTable.row(dataIndex).node();
+        if (!row) return true;
+
+        // Get confidence from the progress bar width or text
+        const confidenceText = data[2]; // Confidence column
+        const confidenceMatch = confidenceText.match(/(\d+)/);
+        const confidence = confidenceMatch ? parseInt(confidenceMatch[0]) : 100;
+
+        // Check confidence threshold
+        if (confidence < minConfidence) return false;
+
+        // Check method filter
+        if (methodFilter) {
+            const methodText = data[1].toLowerCase();
+            if (!methodText.includes(methodFilter)) return false;
+        }
+
+        // Check status filter
+        if (statusFilter) {
+            const statusText = data[8].toLowerCase();
+            if (statusFilter === 'auto' && !statusText.includes('auto')) return false;
+            if (statusFilter === 'review' && !statusText.includes('review')) return false;
+        }
+
+        return true;
+    });
+
+    duplicatesTable.draw();
+    announceToScreenReader(`Filters applied. Showing duplicates with ${minConfidence}% minimum confidence.`);
+}
+
+function resetFilters() {
+    document.getElementById('confidenceSlider').value = 60;
+    document.getElementById('confidenceValue').textContent = '60%';
+    document.getElementById('methodFilter').value = '';
+    document.getElementById('statusFilter').value = '';
+    minConfidence = 60;
+
+    $.fn.dataTable.ext.search.pop();
+    if (duplicatesTable) {
+        duplicatesTable.draw();
+    }
+    showToast('Filters reset', 'info');
+}
+
+// Rerun detection with progress indicator
+async function rerunDetection() {
+    const btn = document.getElementById('rerunBtn');
+    const originalContent = btn.innerHTML;
+
+    btn.disabled = true;
+    btn.innerHTML = `
+        <svg class="w-4 h-4 inline mr-1 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        Detecting...
+    `;
+
+    showToast('Running duplicate detection...', 'info');
+
+    try {
+        const response = await secureFetch('/recompute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
+
+        if (response.ok || response.redirected) {
+            showToast('Duplicate detection completed!', 'success');
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            throw new Error('Detection failed');
+        }
+    } catch (error) {
+        showToast('Failed to run detection: ' + error.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
+    }
+}
+
+// Handle resolve actions with toast feedback
+document.querySelectorAll('form[action="/duplicates/resolve"]').forEach(form => {
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const action = form.querySelector('input[name="action"]').value;
+        const rowId = form.querySelector('input[name="row_id"]').value;
+        const btn = form.querySelector('button[type="submit"]');
+
+        btn.disabled = true;
+
+        try {
+            const formData = new FormData(form);
+            const response = await secureFetch('/duplicates/resolve', {
+                method: 'POST',
+                body: new URLSearchParams(formData)
+            });
+
+            if (response.ok || response.redirected) {
+                const actionText = action === 'exclude' ? 'excluded from' : 'included in';
+                showToast(`Entry ${rowId} ${actionText} actuals`, 'success');
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                throw new Error('Failed to update status');
+            }
+        } catch (error) {
+            showToast('Error: ' + error.message, 'error');
+            btn.disabled = false;
         }
     });
 });

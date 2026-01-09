@@ -1667,21 +1667,110 @@ document.getElementById('allocationForm')?.addEventListener('submit', function(e
     eastInput.value = parseFloat(eastInput.value) / 100;
 });
 
-// Show toast notification
-function showToast(message, isError = false) {
-    const toast = document.getElementById('toast');
-    const toastMessage = document.getElementById('toastMessage');
+// Show toast notification - wrapper for global toast (backward compatible)
+function showToast(message, isErrorOrType = false) {
+    // Support both legacy (boolean) and new (string type) signatures
+    let type = 'success';
+    if (typeof isErrorOrType === 'boolean') {
+        type = isErrorOrType ? 'error' : 'success';
+    } else if (typeof isErrorOrType === 'string') {
+        type = isErrorOrType;
+    }
 
-    toastMessage.textContent = message;
-    toast.className = toast.className.replace('bg-green-600', isError ? 'bg-red-600' : 'bg-green-600');
-    toast.className = toast.className.replace('bg-red-600', isError ? 'bg-red-600' : 'bg-green-600');
-
-    toast.classList.remove('translate-y-20', 'opacity-0');
-
-    setTimeout(() => {
-        toast.classList.add('translate-y-20', 'opacity-0');
-    }, 3000);
+    // Use global toast if available, fallback to local
+    if (window.showToast && window.showToast !== showToast) {
+        window.showToast(message, type);
+    } else {
+        // Fallback: use the old toast element if it exists
+        const toast = document.getElementById('toast');
+        const toastMessage = document.getElementById('toastMessage');
+        if (toast && toastMessage) {
+            toastMessage.textContent = message;
+            toast.className = toast.className.replace(/bg-(green|red|yellow|blue)-600/g, '');
+            const colorClass = type === 'error' ? 'bg-red-600' : type === 'warning' ? 'bg-yellow-600' : 'bg-green-600';
+            toast.classList.add(colorClass);
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 4000);
+        }
+    }
 }
+
+// ============================================================
+// Autosave State Management
+// ============================================================
+const AutosaveState = {
+    pending: new Set(),
+    saved: new Set(),
+    error: new Set(),
+
+    // Set autosave state for a row
+    setState(rowId, state) {
+        this.pending.delete(rowId);
+        this.saved.delete(rowId);
+        this.error.delete(rowId);
+
+        if (state) {
+            this[state].add(rowId);
+        }
+        this.updateRowIndicator(rowId, state);
+    },
+
+    // Update visual indicator on row
+    updateRowIndicator(rowId, state) {
+        const row = document.querySelector(`[data-row-id="${rowId}"]`);
+        if (!row) return;
+
+        let indicator = row.querySelector('.autosave-indicator');
+        if (!indicator) {
+            indicator = document.createElement('div');
+            indicator.className = 'autosave-indicator absolute right-2 top-1/2 transform -translate-y-1/2';
+            const cell = row.querySelector('td:last-child');
+            if (cell) {
+                cell.style.position = 'relative';
+                cell.appendChild(indicator);
+            }
+        }
+
+        const icons = {
+            pending: `<svg class="w-4 h-4 text-yellow-500 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>`,
+            saved: `<svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>`,
+            error: `<svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>`
+        };
+
+        indicator.innerHTML = icons[state] || '';
+        indicator.title = state ? state.charAt(0).toUpperCase() + state.slice(1) : '';
+
+        // Auto-clear saved indicator after delay
+        if (state === 'saved') {
+            setTimeout(() => {
+                if (this.saved.has(rowId)) {
+                    this.setState(rowId, null);
+                }
+            }, 3000);
+        }
+    }
+};
+
+// Debounced autosave function
+const debouncedAutosave = debounce(async function(rowId, saveFunction) {
+    AutosaveState.setState(rowId, 'pending');
+    try {
+        await saveFunction();
+        AutosaveState.setState(rowId, 'saved');
+    } catch (error) {
+        AutosaveState.setState(rowId, 'error');
+        console.error('Autosave failed:', error);
+    }
+}, 1000); // 1 second debounce as per config
 
 // ============================================================
 // Singleton Dropdown Manager - Consolidated Dropdown System
