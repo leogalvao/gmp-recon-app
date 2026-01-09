@@ -1,4 +1,18 @@
 # GMP Reconciliation App Dependencies
+# See DEPENDENCY_AUDIT.md for full analysis
+
+# ============================================
+# Security-Critical Minimum Versions
+# ============================================
+# These packages must be upgraded before others to fix known vulnerabilities
+# Run: pip install --upgrade pip setuptools wheel cryptography urllib3
+# cryptography>=43.0.1  # CVE-2023-50782, CVE-2024-0727, PYSEC-2024-225
+# urllib3>=2.6.3        # CVE-2026-21441 (decompression bomb)
+
+# ============================================
+# Core Dependencies (Required)
+# ============================================
+
 # Web Framework
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
@@ -9,11 +23,8 @@ pandas>=2.0.0
 numpy>=1.24.0
 openpyxl>=3.1.0  # For Excel file reading
 
-# Machine Learning
+# Machine Learning (Core)
 scikit-learn>=1.3.0
-torch>=2.0.0  # Optional: for MLP model
-tensorflow>=2.15.0  # For LSTM/Transformer forecasting
-mlflow>=2.8.0  # Experiment tracking
 
 # CLI
 click>=8.0.0
@@ -39,6 +50,28 @@ pydantic>=2.0.0
 # Configuration
 pyyaml>=6.0.0
 
-# Testing
+# ============================================
+# Testing Dependencies
+# ============================================
 httpx>=0.25.0
 pytest>=7.0.0
+
+# ============================================
+# Optional: Advanced ML Dependencies
+# ============================================
+# These are large dependencies (~2.5GB combined) needed only for advanced features.
+# Install separately if needed:
+#   pip install tensorflow>=2.15.0  # For LSTM/Transformer forecasting (~500MB)
+#   pip install torch>=2.0.0        # For MLP model alternative (~2GB)
+
+# LSTM/Transformer forecasting models (app/forecasting/)
+tensorflow>=2.15.0
+
+# Optional MLP model with PyTorch fallback (app/modules/ml.py)
+# Commented out - sklearn LinearRegression is used as fallback when unavailable
+# torch>=2.0.0
+
+# ============================================
+# REMOVED (unused in codebase)
+# ============================================
+# mlflow>=2.8.0  # No imports found - removed to reduce bloat
