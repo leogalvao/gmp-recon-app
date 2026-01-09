@@ -18,7 +18,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, Request, Depends, Form, HTTPException, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel as PydanticBaseModel
 from sqlalchemy.orm import Session
@@ -1333,6 +1333,197 @@ async def get_suggestions_for_direct_cost(
         "direct_cost_id": direct_cost_id,
         "suggestions": suggestions
     }
+
+
+@app.post("/api/mappings/save")
+async def api_save_mapping(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    JSON API endpoint to save or update a mapping.
+
+    Body:
+    {
+        "mapping_type": "budget_to_gmp" | "direct_to_budget" | "allocation",
+        "action": "save" | "delete" (optional, default "save"),
+
+        // For budget_to_gmp:
+        "budget_code": "string",
+        "gmp_division": "string",
+        "side": "EAST" | "WEST" | "BOTH" (optional, default "BOTH"),
+
+        // For direct_to_budget:
+        "cost_code": "string",
+        "name": "string",
+        "budget_code": "string",
+        "vendor": "string" (optional),
+        "side": "EAST" | "WEST" | "BOTH" (optional, default "BOTH"),
+        "suggested_budget_code": "string" (optional, for feedback),
+        "suggestion_score": number (optional, for feedback),
+
+        // For allocation:
+        "code": "string",
+        "pct_west": number,
+        "pct_east": number
+    }
+
+    Returns:
+    {
+        "success": true,
+        "mapping_id": number,
+        "action": "created" | "updated" | "deleted"
+    }
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "Invalid JSON body"}
+        )
+
+    mapping_type = data.get('mapping_type')
+    action = data.get('action', 'save')
+
+    if not mapping_type:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "Missing mapping_type"}
+        )
+
+    if mapping_type not in ['budget_to_gmp', 'direct_to_budget', 'allocation']:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": f"Invalid mapping_type: {mapping_type}"}
+        )
+
+    try:
+        if mapping_type == "budget_to_gmp":
+            budget_code = data.get('budget_code')
+            if not budget_code:
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": "Missing budget_code"}
+                )
+
+            if action == 'delete':
+                deleted = db.query(BudgetToGMP).filter(BudgetToGMP.budget_code == budget_code).delete()
+                db.commit()
+                return {"success": True, "deleted_count": deleted, "action": "deleted"}
+
+            gmp_division = data.get('gmp_division')
+            if not gmp_division:
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": "Missing gmp_division"}
+                )
+
+            side = data.get('side', 'BOTH').upper()
+            if side not in ['EAST', 'WEST', 'BOTH']:
+                side = 'BOTH'
+
+            mapping_data = {
+                'budget_code': budget_code,
+                'gmp_division': gmp_division,
+                'side': side,
+                'confidence': 1.0
+            }
+
+            result = save_mapping(db, 'budget_to_gmp', mapping_data)
+            return {"success": True, "action": result.get('action', 'saved'), "mapping_id": result.get('id')}
+
+        elif mapping_type == "direct_to_budget":
+            cost_code = data.get('cost_code')
+            name = data.get('name', '')
+
+            if not cost_code:
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": "Missing cost_code"}
+                )
+
+            if action == 'delete':
+                deleted = db.query(DirectToBudget).filter(
+                    DirectToBudget.cost_code == cost_code,
+                    DirectToBudget.name == name
+                ).delete()
+                db.commit()
+                return {"success": True, "deleted_count": deleted, "action": "deleted"}
+
+            budget_code = data.get('budget_code')
+            if not budget_code:
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": "Missing budget_code"}
+                )
+
+            vendor = data.get('vendor', '')
+            suggested_budget = data.get('suggested_budget_code', '')
+            suggestion_score = data.get('suggestion_score')
+            side = data.get('side', 'BOTH').upper()
+            if side not in ['EAST', 'WEST', 'BOTH']:
+                side = 'BOTH'
+
+            mapping_data = {
+                'cost_code': cost_code,
+                'name': name,
+                'budget_code': budget_code,
+                'side': side,
+                'confidence': 1.0,
+                'method': 'user_confirmed' if suggested_budget == budget_code else 'manual',
+                'vendor_normalized': normalize_vendor(vendor) if vendor else None
+            }
+
+            result = save_mapping(db, 'direct_to_budget', mapping_data)
+
+            # Record feedback for the learning loop
+            if vendor or name:
+                record_mapping_feedback(
+                    db=db,
+                    vendor=vendor,
+                    name=name,
+                    selected_budget_code=budget_code,
+                    suggested_budget_code=suggested_budget,
+                    suggestion_score=float(suggestion_score) / 100 if suggestion_score else None,
+                    user_id='web_user'
+                )
+
+            return {"success": True, "action": result.get('action', 'saved'), "mapping_id": result.get('id')}
+
+        elif mapping_type == "allocation":
+            code = data.get('code')
+            if not code:
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "error": "Missing code"}
+                )
+
+            if action == 'delete':
+                deleted = db.query(Allocation).filter(Allocation.code == code).delete()
+                db.commit()
+                return {"success": True, "deleted_count": deleted, "action": "deleted"}
+
+            pct_west = float(data.get('pct_west', 0.5))
+            pct_east = float(data.get('pct_east', 0.5))
+
+            mapping_data = {
+                'code': code,
+                'region': 'Both' if pct_west > 0 and pct_east > 0 else ('West' if pct_west > 0 else 'East'),
+                'pct_west': pct_west,
+                'pct_east': pct_east,
+                'confirmed': True
+            }
+
+            result = save_mapping(db, 'allocations', mapping_data)
+            return {"success": True, "action": result.get('action', 'saved'), "mapping_id": result.get('id')}
+
+    except Exception as e:
+        db.rollback()
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
 
 
 @app.post("/api/mappings/bulk-accept")
