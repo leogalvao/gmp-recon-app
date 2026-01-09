@@ -114,10 +114,12 @@ def allocate_amount_east_west(
 def filter_by_as_of_date(direct_costs_df: pd.DataFrame, as_of_date: Optional[datetime]) -> pd.DataFrame:
     """Filter direct costs to only include rows up to as_of_date."""
     if as_of_date is None:
-        return direct_costs_df
-    
-    mask = direct_costs_df['date_parsed'] <= as_of_date
-    return direct_costs_df[mask].copy()
+        return direct_costs_df.copy()
+
+    # Use .values to create boolean mask to avoid index alignment issues
+    # when input DataFrame has a non-contiguous index from prior filtering
+    mask = (direct_costs_df['date_parsed'] <= as_of_date).values
+    return direct_costs_df[mask].copy().reset_index(drop=True)
 
 
 def aggregate_actuals_by_gmp(
@@ -148,8 +150,9 @@ def aggregate_actuals_by_gmp(
     # Filter by date
     filtered = filter_by_as_of_date(direct_costs_df, as_of_date)
 
-    # Exclude flagged duplicates
-    filtered = filtered[filtered['excluded_from_actuals'] == False]
+    # Exclude flagged duplicates - use .values to avoid index alignment issues
+    mask = (filtered['excluded_from_actuals'] == False).values
+    filtered = filtered[mask].reset_index(drop=True)
 
     # Join direct costs to budget to get GMP division
     budget_gmp_map = budget_df[['Budget Code', 'gmp_division']].drop_duplicates()

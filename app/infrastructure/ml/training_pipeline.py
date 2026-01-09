@@ -157,6 +157,11 @@ class TrainingPipeline:
             X_temporal_train, X_static_train, y_train,
             X_temporal_val, X_static_val, y_val
         """
+        # Reset indices to prevent "Unalignable boolean Series" errors
+        # when input DataFrames have non-contiguous indices from prior filtering
+        historical_costs = historical_costs.copy().reset_index(drop=True)
+        building_data = building_data.copy().reset_index(drop=True)
+
         sequences = []
         targets = []
         static_features = []

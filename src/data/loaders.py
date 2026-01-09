@@ -117,6 +117,10 @@ def prepare_monthly_costs(
     Returns:
         Dict of trade_name -> monthly cost DataFrame
     """
+    # Make a copy and reset index to prevent "Unalignable boolean Series" errors
+    # when input DataFrame has a non-contiguous index from prior filtering
+    direct_costs = direct_costs.copy().reset_index(drop=True)
+
     # Ensure date is datetime
     direct_costs[date_column] = pd.to_datetime(direct_costs[date_column], errors='coerce')
     direct_costs['year_month'] = direct_costs[date_column].dt.to_period('M').astype(str)
@@ -124,14 +128,16 @@ def prepare_monthly_costs(
     result = {}
 
     for trade in direct_costs[trade_column].dropna().unique():
-        trade_costs = direct_costs[direct_costs[trade_column] == trade]
+        # Use .values for boolean mask to avoid index alignment issues
+        mask = (direct_costs[trade_column] == trade).values
+        trade_costs = direct_costs[mask]
 
         monthly = trade_costs.groupby('year_month').agg({
             amount_column: 'sum'
         }).reset_index()
 
         monthly.columns = ['year_month', 'total_cost']
-        monthly = monthly.sort_values('year_month')
+        monthly = monthly.sort_values('year_month').reset_index(drop=True)
 
         if len(monthly) > 0:
             result[trade] = monthly
