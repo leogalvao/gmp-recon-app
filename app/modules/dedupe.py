@@ -281,38 +281,40 @@ def should_auto_collapse(score: float) -> bool:
     return score >= AUTO_COLLAPSE_THRESHOLD
 
 
-def apply_duplicate_exclusions(df: pd.DataFrame, duplicates: List[Dict], 
+def apply_duplicate_exclusions(df: pd.DataFrame, duplicates: List[Dict],
                                 auto_collapse: bool = True) -> pd.DataFrame:
     """
     Apply exclusions to the direct costs DataFrame based on detected duplicates.
-    
+
     For auto-collapse threshold duplicates, mark all but one as excluded.
     For lower confidence, just flag but don't exclude.
     """
-    df = df.copy()
-    
+    # Make a copy and reset index to prevent "Unalignable boolean Series" errors
+    df = df.copy().reset_index(drop=True)
+
     if not duplicates:
         return df
-    
+
     # Group duplicates by group_id
     groups = defaultdict(list)
     for dup in duplicates:
         groups[dup['group_id']].append(dup)
-    
+
     for group_id, group_dups in groups.items():
         # Sort by row_id to keep consistent which one to keep
         group_dups.sort(key=lambda x: x['direct_cost_row_id'])
-        
+
         # Check if auto-collapse should apply
         max_score = max(d['score'] for d in group_dups)
-        
+
         if auto_collapse and should_auto_collapse(max_score):
             # Keep first, exclude rest
             for i, dup in enumerate(group_dups):
                 if i > 0:
-                    mask = df['direct_cost_id'] == dup['direct_cost_row_id']
+                    # Use .values to avoid index alignment issues with .loc
+                    mask = (df['direct_cost_id'] == dup['direct_cost_row_id']).values
                     df.loc[mask, 'excluded_from_actuals'] = True
-    
+
     return df
 
 

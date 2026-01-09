@@ -111,6 +111,12 @@ class ScheduleDrivenTrainer:
         logger.info("SCHEDULE-DRIVEN TRAINING PIPELINE")
         logger.info("=" * 60)
 
+        # Reset index on input DataFrames to prevent "Unalignable boolean Series" errors
+        # This ensures clean boolean indexing operations throughout the pipeline
+        direct_costs_df = direct_costs_df.copy().reset_index(drop=True)
+        schedule_df = schedule_df.copy().reset_index(drop=True)
+        gmp_breakdown_df = gmp_breakdown_df.copy().reset_index(drop=True)
+
         # ─────────────────────────────────────────────────────────────────────
         # Step 1: Parse schedule (PRIMARY)
         # ─────────────────────────────────────────────────────────────────────
