@@ -4897,7 +4897,9 @@ async def trigger_project_training(
 
         # Calculate linkage score
         total_costs = len(direct_costs_df) if not direct_costs_df.empty else 0
-        linked_costs = len(direct_costs_df[direct_costs_df.get('mapped_budget_code', pd.Series()).notna()]) if not direct_costs_df.empty else 0
+        linked_costs = 0
+        if not direct_costs_df.empty and 'mapped_budget_code' in direct_costs_df.columns:
+            linked_costs = direct_costs_df['mapped_budget_code'].notna().sum()
         linkage_score = (linked_costs / total_costs * 100) if total_costs > 0 else 0.0
 
         # Calculate budget coverage
