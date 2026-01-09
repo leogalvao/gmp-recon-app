@@ -283,6 +283,7 @@ class GMPRepository(BaseRepository[GMP]):
         return {
             'id': gmp.id,
             'uuid': gmp.uuid,
+            'project_id': gmp.project_id,
             'division': gmp.division,
             'zone': gmp.zone,
             'description': gmp.description,
