@@ -379,27 +379,44 @@ def apply_allocations(df: pd.DataFrame, amount_col: str, code_col: str,
     return df
 
 
-def save_mapping(db: Session, table: str, data: Dict, user: str = 'system'):
+def save_mapping(db: Session, table: str, data: Dict, user: str = 'system') -> Dict:
     """
     Save a mapping to the database with audit trail.
+
+    Returns:
+        Dict with 'action' ('created' or 'updated') and 'id' (record ID)
     """
     timestamp = datetime.utcnow()
-    
+    action_taken = 'created'
+    record_id = None
+
     if table == 'budget_to_gmp':
         existing = db.query(BudgetToGMP).filter(BudgetToGMP.budget_code == data['budget_code']).first()
         old_value = None
         if existing:
-            old_value = json.dumps({'gmp_division': existing.gmp_division, 'confidence': existing.confidence})
+            action_taken = 'updated'
+            old_value = json.dumps({
+                'gmp_division': existing.gmp_division,
+                'side': existing.side,
+                'confidence': existing.confidence
+            })
+            # Update all relevant fields
             existing.gmp_division = data['gmp_division']
             existing.confidence = data.get('confidence', 1.0)
+            existing.side = data.get('side', existing.side)  # Preserve existing if not provided
+            if 'cost_code_tier2' in data:
+                existing.cost_code_tier2 = data['cost_code_tier2']
             existing.updated_at = timestamp
             record_id = existing.id
         else:
+            # Ensure defaults for new records
+            if 'side' not in data:
+                data['side'] = 'BOTH'
             new_record = BudgetToGMP(**data)
             db.add(new_record)
             db.flush()
             record_id = new_record.id
-        
+
         audit = MappingAudit(
             table_name=table,
             record_id=record_id,
@@ -410,7 +427,7 @@ def save_mapping(db: Session, table: str, data: Dict, user: str = 'system'):
             timestamp=timestamp
         )
         db.add(audit)
-    
+
     elif table == 'direct_to_budget':
         existing = db.query(DirectToBudget).filter(
             DirectToBudget.cost_code == data['cost_code'],
@@ -418,17 +435,35 @@ def save_mapping(db: Session, table: str, data: Dict, user: str = 'system'):
         ).first()
         old_value = None
         if existing:
-            old_value = json.dumps({'budget_code': existing.budget_code, 'confidence': existing.confidence})
+            action_taken = 'updated'
+            old_value = json.dumps({
+                'budget_code': existing.budget_code,
+                'side': existing.side,
+                'method': existing.method,
+                'vendor_normalized': existing.vendor_normalized,
+                'confidence': existing.confidence
+            })
+            # Update all relevant fields
             existing.budget_code = data['budget_code']
             existing.confidence = data.get('confidence', 1.0)
+            existing.side = data.get('side', existing.side)  # Preserve existing if not provided
+            if 'method' in data:
+                existing.method = data['method']
+            if 'vendor_normalized' in data:
+                existing.vendor_normalized = data['vendor_normalized']
             existing.updated_at = timestamp
             record_id = existing.id
         else:
+            # Ensure defaults for new records
+            if 'side' not in data:
+                data['side'] = 'BOTH'
+            if 'method' not in data:
+                data['method'] = 'manual'
             new_record = DirectToBudget(**data)
             db.add(new_record)
             db.flush()
             record_id = new_record.id
-        
+
         audit = MappingAudit(
             table_name=table,
             record_id=record_id,
@@ -439,11 +474,12 @@ def save_mapping(db: Session, table: str, data: Dict, user: str = 'system'):
             timestamp=timestamp
         )
         db.add(audit)
-    
+
     elif table == 'allocations':
         existing = db.query(Allocation).filter(Allocation.code == data['code']).first()
         old_value = None
         if existing:
+            action_taken = 'updated'
             old_value = json.dumps({
                 'region': existing.region,
                 'pct_west': existing.pct_west,
@@ -461,7 +497,7 @@ def save_mapping(db: Session, table: str, data: Dict, user: str = 'system'):
             db.add(new_record)
             db.flush()
             record_id = new_record.id
-        
+
         audit = MappingAudit(
             table_name=table,
             record_id=record_id,
@@ -472,8 +508,9 @@ def save_mapping(db: Session, table: str, data: Dict, user: str = 'system'):
             timestamp=timestamp
         )
         db.add(audit)
-    
+
     db.commit()
+    return {'action': action_taken, 'id': record_id}
 
 
 def get_mapping_stats(budget_df: pd.DataFrame, direct_df: pd.DataFrame) -> Dict:
