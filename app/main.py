@@ -3,6 +3,7 @@ Main FastAPI Application for GMP Reconciliation.
 Serves HTML UI via Jinja2 templates and provides REST endpoints.
 """
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # Add parent directory to path for imports
@@ -68,11 +69,23 @@ from app.modules.csrf import csrf, get_or_create_csrf_token
 from app.api.v1 import api_router as v1_router
 
 
+# Lifespan context manager for startup/shutdown events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    init_db()
+    ensure_default_settings()
+    setup_scheduler()
+    yield
+    # Shutdown (nothing to clean up currently)
+
+
 # Initialize FastAPI app
 app = FastAPI(
     title="GMP Reconciliation App",
     description="Reconcile Procore Direct Costs against GMP funding via Budget mapping",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Include v1 API routes for cost management hierarchy
@@ -145,14 +158,6 @@ def convert_numpy_types(obj):
     elif pd.isna(obj):
         return None
     return obj
-
-
-# Initialize database on startup
-@app.on_event("startup")
-async def startup_event():
-    init_db()
-    ensure_default_settings()
-    setup_scheduler()
 
 
 # Background scheduler for nightly retraining
