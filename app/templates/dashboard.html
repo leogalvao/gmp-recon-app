@@ -197,12 +197,39 @@
     </div>
 
     <div class="max-w-7xl mx-auto px-6 py-8">
+        <!-- Warnings Banner -->
+        {% if project_metrics.warnings %}
+        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                    </svg>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm text-yellow-700">
+                        <strong>Data Warnings:</strong>
+                        {% for warning in project_metrics.warnings %}
+                            {{ warning }}{% if not loop.last %}; {% endif %}
+                        {% endfor %}
+                    </p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Key Metrics -->
         <div class="dashboard-grid mb-8">
             <!-- Total GMP Budget -->
             <div class="kpi-card highlight">
                 <div class="kpi-label">Total GMP Budget</div>
-                <div class="kpi-value">{{ project_metrics.total_gmp_display }}</div>
+                <div class="kpi-value">
+                    {% if project_metrics.total_gmp_cents and project_metrics.total_gmp_cents > 0 %}
+                        {{ project_metrics.total_gmp_display }}
+                    {% else %}
+                        <span class="text-yellow-200">N/A</span>
+                    {% endif %}
+                </div>
                 <div class="kpi-sub">Guaranteed Maximum Price</div>
             </div>
 
@@ -217,25 +244,43 @@
             <div class="kpi-card">
                 <div class="kpi-label">Estimate at Completion</div>
                 <div class="kpi-value">{{ project_metrics.total_eac_display }}</div>
-                <div class="kpi-sub">Forecasted final cost</div>
+                <div class="kpi-sub">Actual + Forecast Remaining</div>
             </div>
 
             <!-- Variance -->
             <div class="kpi-card">
                 <div class="kpi-label">Variance (Budget - EAC)</div>
-                <div class="kpi-value {% if project_metrics.total_variance_cents >= 0 %}text-green-600{% else %}text-red-600{% endif %}">
-                    {{ project_metrics.total_variance_display }}
+                <div class="kpi-value {% if project_metrics.total_variance_cents is not none %}{% if project_metrics.total_variance_cents >= 0 %}text-green-600{% else %}text-red-600{% endif %}{% endif %}">
+                    {% if project_metrics.total_variance_cents is not none %}
+                        {{ project_metrics.total_variance_display }}
+                    {% else %}
+                        <span class="text-gray-400">N/A</span>
+                    {% endif %}
                 </div>
-                <div class="kpi-sub">{{ project_metrics.variance_pct }}% of budget</div>
+                <div class="kpi-sub">
+                    {% if project_metrics.variance_pct is not none %}
+                        {{ project_metrics.variance_pct }}% of budget
+                    {% else %}
+                        Budget unavailable
+                    {% endif %}
+                </div>
             </div>
 
             <!-- CPI -->
             <div class="kpi-card">
                 <div class="kpi-label">Cost Performance Index</div>
-                <div class="kpi-value {% if project_metrics.overall_cpi and project_metrics.overall_cpi >= 1 %}text-green-600{% elif project_metrics.overall_cpi %}text-red-600{% endif %}">
-                    {{ project_metrics.overall_cpi if project_metrics.overall_cpi else 'N/A' }}
+                <div class="kpi-value {% if project_metrics.overall_cpi %}{% if project_metrics.overall_cpi >= 1 %}text-green-600{% else %}text-red-600{% endif %}{% endif %}">
+                    {% if project_metrics.overall_cpi %}
+                        {{ project_metrics.overall_cpi }}
+                    {% else %}
+                        <span class="text-gray-400" title="CPI requires Earned Value (EV). Use Schedule Progress to estimate EV.">N/A</span>
+                    {% endif %}
                 </div>
-                <div class="kpi-sub">{% if project_metrics.overall_cpi and project_metrics.overall_cpi >= 1 %}Under budget{% elif project_metrics.overall_cpi %}Over budget{% else %}Not calculated{% endif %}</div>
+                <div class="kpi-sub">
+                    {% if project_metrics.overall_cpi and project_metrics.overall_cpi >= 1 %}Under budget
+                    {% elif project_metrics.overall_cpi %}Over budget
+                    {% else %}EV not configured{% endif %}
+                </div>
             </div>
 
             <!-- Schedule Variance -->

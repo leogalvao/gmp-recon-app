@@ -44,7 +44,8 @@ from app.modules.mapping import (
 )
 from app.modules.reconciliation import (
     compute_reconciliation, format_for_display, compute_summary_metrics,
-    validate_tie_outs, get_settings, get_gmp_drilldown
+    validate_tie_outs, get_settings, get_gmp_drilldown,
+    compute_dashboard_summary, compute_schedule_based_forecast
 )
 from app.modules.dedupe import (
     detect_duplicates, apply_duplicate_exclusions, get_duplicates_summary,
@@ -365,25 +366,20 @@ async def root():
 async def dashboard_page(request: Request, db: Session = Depends(get_db)):
     """Project dashboard with overview metrics and division summaries."""
     try:
-        # Get full reconciliation data
+        # Get dashboard summary (single source of truth for KPIs)
+        dashboard_summary = compute_dashboard_summary(db)
+
+        # Get full reconciliation data for division cards
         result = run_full_reconciliation(db)
         recon_rows = result['recon_rows']
-        summary = result['summary']
 
-        # Get schedule variances
+        # Get schedule variances for per-division display
         schedule_variances = get_schedule_variances()
 
-        # Get forecast rollup
+        # Get forecast rollup for per-division CPI
         forecast_rollup = compute_project_rollup(db)
 
-        # Calculate project-level metrics
-        total_gmp_cents = sum(row.get('gmp_amount_cents', 0) or 0 for row in recon_rows)
-        total_actual_cents = sum(row.get('actual_total_cents', 0) or 0 for row in recon_rows)
-        total_eac_cents = forecast_rollup.get('total_eac_cents', 0) or total_actual_cents
-        total_variance_cents = total_gmp_cents - total_eac_cents
-        overall_cpi = forecast_rollup.get('overall_cpi', 1.0)
-
-        # Calculate schedule variance totals
+        # Calculate schedule variance totals for display
         total_schedule_expected = sum(v.get('expected', 0) for v in schedule_variances.values())
         total_schedule_spent = sum(v.get('spent', 0) for v in schedule_variances.values())
         total_schedule_variance = total_schedule_spent - total_schedule_expected
@@ -400,7 +396,7 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
             # Get forecast data for this division
             div_forecast = next((d for d in forecast_rollup.get('by_division', []) if d['gmp_division'] == gmp_div), {})
             eac_cents = div_forecast.get('eac_cents', actual_cents) or actual_cents
-            cpi = div_forecast.get('cpi', 1.0)
+            cpi = div_forecast.get('cpi')
 
             # Get schedule variance
             sched_var = schedule_variances.get(gmp_div, {})
@@ -446,24 +442,34 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         # Get mapping stats
         mapping_stats = result.get('mapping_stats', {})
 
+        # Build project_metrics from dashboard_summary (single source of truth)
+        total_gmp_cents = dashboard_summary['total_gmp_budget_cents']
+        actual_cents_total = dashboard_summary['actual_costs_cents']
+        eac_cents_total = dashboard_summary['eac_cents']
+        variance_cents = dashboard_summary['variance_cents']
+
+        # Format for display
+        project_metrics = {
+            'total_gmp_cents': total_gmp_cents,
+            'total_gmp_display': cents_to_display(total_gmp_cents) if total_gmp_cents > 0 else 'N/A',
+            'total_actual_cents': actual_cents_total,
+            'total_actual_display': cents_to_display(actual_cents_total),
+            'total_eac_cents': eac_cents_total,
+            'total_eac_display': cents_to_display(eac_cents_total),
+            'total_variance_cents': variance_cents,
+            'total_variance_display': cents_to_display(variance_cents) if variance_cents is not None else 'N/A',
+            'variance_pct': round(variance_cents / total_gmp_cents * 100, 1) if total_gmp_cents > 0 and variance_cents is not None else None,
+            'pct_complete': dashboard_summary['progress_pct'],
+            'overall_cpi': dashboard_summary['cpi'],
+            'schedule_variance': total_schedule_variance,
+            'schedule_variance_pct': total_schedule_variance_pct,
+            'schedule_status': 'over' if total_schedule_variance > 0 else 'under' if total_schedule_variance < 0 else 'on_track',
+            'warnings': dashboard_summary['warnings']
+        }
+
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
-            "project_metrics": {
-                'total_gmp_cents': total_gmp_cents,
-                'total_gmp_display': cents_to_display(total_gmp_cents),
-                'total_actual_cents': total_actual_cents,
-                'total_actual_display': cents_to_display(total_actual_cents),
-                'total_eac_cents': total_eac_cents,
-                'total_eac_display': cents_to_display(total_eac_cents),
-                'total_variance_cents': total_variance_cents,
-                'total_variance_display': cents_to_display(total_variance_cents),
-                'variance_pct': round(total_variance_cents / total_gmp_cents * 100, 1) if total_gmp_cents else 0,
-                'pct_complete': round(total_actual_cents / total_eac_cents * 100, 1) if total_eac_cents else 0,
-                'overall_cpi': overall_cpi,
-                'schedule_variance': total_schedule_variance,
-                'schedule_variance_pct': total_schedule_variance_pct,
-                'schedule_status': 'over' if total_schedule_variance > 0 else 'under' if total_schedule_variance < 0 else 'on_track'
-            },
+            "project_metrics": project_metrics,
             "division_cards": division_cards,
             "health_counts": health_counts,
             "mapping_stats": mapping_stats,
@@ -1680,6 +1686,43 @@ async def recon_summary_json(db: Session = Depends(get_db)):
         "mapping_stats": result['mapping_stats'],
         "duplicates_summary": result['duplicates_summary']
     })
+
+
+# =============================================================================
+# Dashboard Summary API (Single Source of Truth for KPIs)
+# =============================================================================
+
+class DashboardSummaryResponse(PydanticBaseModel):
+    """Response model for dashboard summary metrics."""
+    total_gmp_budget_cents: int
+    actual_costs_cents: int
+    forecast_remaining_cents: int
+    eac_cents: int
+    variance_cents: Optional[int]
+    progress_pct: float
+    cpi: Optional[float]
+    schedule_variance_days: Optional[int]
+    warnings: List[str]
+
+
+@app.get("/api/dashboard/summary", response_model=DashboardSummaryResponse)
+async def get_dashboard_summary_api(db: Session = Depends(get_db)):
+    """
+    Get dashboard summary metrics (single source of truth).
+
+    Returns all KPIs computed from authoritative data sources:
+    - total_gmp_budget_cents: From GMP entities table (static baseline)
+    - actual_costs_cents: From DirectCostEntity table
+    - forecast_remaining_cents: From ForecastSnapshot table (ETC)
+    - eac_cents: Actual + Forecast Remaining
+    - variance_cents: Budget - EAC (positive = underrun)
+    - progress_pct: Actual / EAC * 100
+    - cpi: EV / AC (only if EV available)
+    - schedule_variance_days: Days ahead/behind schedule
+    - warnings: List of data quality warnings
+    """
+    summary = compute_dashboard_summary(db)
+    return summary
 
 
 @app.get("/api/gmp/drilldown/{gmp_division}")

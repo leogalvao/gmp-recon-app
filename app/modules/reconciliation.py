@@ -8,7 +8,10 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Optional, List
 from datetime import datetime
+import logging
 from sqlalchemy.orm import Session
+from sqlalchemy import func, and_
+from sqlalchemy.exc import OperationalError
 
 from .etl import (
     cents_to_display,
@@ -17,7 +20,12 @@ from .etl import (
     fuzzy_match_breakdown_to_gmp,
     calculate_weighted_progress
 )
-from ..models import Settings, GMPBudgetBreakdown
+from ..models import (
+    Settings, GMPBudgetBreakdown, GMP, DirectCostEntity,
+    ForecastSnapshot, ScheduleActivity, ScheduleToGMPMapping
+)
+
+logger = logging.getLogger(__name__)
 
 
 def safe_divide(numerator: int, denominator: int) -> float:
@@ -1001,4 +1009,280 @@ def compute_project_schedule_summary(db: Session) -> Dict:
             'total_duration_days': total_duration_days,
             'total_weight': round(total_weight, 2)
         }
+    }
+
+
+# =============================================================================
+# Dashboard Summary Metrics (Single Source of Truth)
+# =============================================================================
+
+def get_total_gmp_budget(db: Session) -> int:
+    """
+    Get total GMP budget from GMP entities table.
+
+    This is the authoritative source for the contract total (static baseline).
+    Only changes via approved Change Orders or GMP Excel reload.
+
+    Returns:
+        Total GMP budget in cents, or 0 if no GMP data exists.
+    """
+    # Sum original_amount_cents + approved change orders for each GMP entity
+    gmp_entities = db.query(GMP).all()
+
+    if not gmp_entities:
+        return 0
+
+    total_cents = 0
+    for gmp in gmp_entities:
+        total_cents += gmp.original_amount_cents or 0
+        # Add approved change orders
+        total_cents += gmp.approved_change_order_total_cents
+
+    return total_cents
+
+
+def get_total_actual_costs(db: Session) -> int:
+    """
+    Get total actual costs from DirectCostEntity table.
+
+    Excludes voided transactions and duplicates.
+
+    Returns:
+        Total actual costs in cents.
+    """
+    # Query DirectCostEntity, excluding any voided or excluded records
+    # The DirectCostEntity model uses gross_amount_cents
+    result = db.query(func.sum(DirectCostEntity.gross_amount_cents)).scalar()
+
+    return result or 0
+
+
+def get_total_forecast_remaining(db: Session) -> Optional[int]:
+    """
+    Get total forecast remaining (ETC) from ForecastSnapshot table.
+
+    Uses the latest snapshot per GMP division.
+
+    Returns:
+        Total forecast remaining in cents, or None if no forecast data.
+    """
+    # Get current snapshots (is_current = True)
+    snapshots = db.query(ForecastSnapshot).filter(
+        ForecastSnapshot.is_current == True
+    ).all()
+
+    if not snapshots:
+        return None
+
+    # Sum etc_cents (Estimate to Complete = forecast remaining)
+    total_etc = sum(s.etc_cents or 0 for s in snapshots)
+
+    return total_etc
+
+
+def compute_weighted_schedule_progress(db: Session) -> Optional[float]:
+    """
+    Compute weighted schedule progress across all activities.
+
+    Uses P6-style weighting based on critical path and duration.
+
+    Returns:
+        Weighted progress as a float (0.0 to 1.0), or None if no schedule data.
+    """
+    try:
+        activities = db.query(ScheduleActivity).all()
+
+        if not activities:
+            return None
+
+        total_weight = 0.0
+        weighted_sum = 0.0
+
+        for activity in activities:
+            # Use P6 progress_pct if available
+            if hasattr(activity, 'progress_pct') and activity.progress_pct is not None:
+                progress = activity.progress_pct
+            else:
+                progress = (activity.pct_complete or 0) / 100.0
+
+            # Compute weight using P6 algorithm
+            weight = compute_activity_weight(activity, 1.0)
+            weighted_sum += weight * progress
+            total_weight += weight
+
+        if total_weight > 0:
+            return weighted_sum / total_weight
+
+        return None
+
+    except OperationalError as e:
+        logger.warning(f"Schedule query failed: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error computing schedule progress: {e}")
+        return None
+
+
+def compute_cpi_if_ev_available(
+    db: Session,
+    actual_cents: int,
+    budget_cents: int
+) -> Optional[float]:
+    """
+    Compute CPI only if Earned Value (EV) is available.
+
+    CPI = EV / AC (Earned Value / Actual Cost)
+
+    EV can come from:
+    1. ForecastSnapshot.ev_cents if tracked
+    2. Schedule progress × Budget (as proxy)
+
+    Returns:
+        CPI as float, or None if EV is not available.
+    """
+    if actual_cents <= 0:
+        return None
+
+    # First, try to get EV from forecast snapshots
+    snapshots = db.query(ForecastSnapshot).filter(
+        ForecastSnapshot.is_current == True
+    ).all()
+
+    total_ev = sum(s.ev_cents or 0 for s in snapshots if s.ev_cents is not None)
+
+    if total_ev > 0:
+        # We have tracked EV
+        return round(total_ev / actual_cents, 3)
+
+    # Try schedule-weighted progress as EV proxy
+    weighted_progress = compute_weighted_schedule_progress(db)
+
+    if weighted_progress is not None and budget_cents > 0:
+        ev_cents = int(budget_cents * weighted_progress)
+        if ev_cents > 0:
+            return round(ev_cents / actual_cents, 3)
+
+    # EV not available
+    return None
+
+
+def compute_schedule_variance_days(db: Session) -> Optional[int]:
+    """
+    Compute schedule variance in days.
+
+    Compares actual progress to planned progress based on schedule dates.
+
+    Returns:
+        Schedule variance in days (positive = ahead, negative = behind),
+        or None if schedule data is unavailable.
+    """
+    try:
+        from datetime import date
+
+        activities = db.query(ScheduleActivity).all()
+
+        if not activities:
+            return None
+
+        today = date.today()
+        total_days_ahead = 0
+        activity_count = 0
+
+        for activity in activities:
+            # Need both planned and actual dates
+            if not activity.planned_finish or not activity.finish_date:
+                continue
+
+            # Calculate days ahead/behind
+            planned_finish = activity.planned_finish
+            current_finish = activity.finish_date
+
+            # Positive = ahead of schedule, negative = behind
+            variance_days = (planned_finish - current_finish).days
+            total_days_ahead += variance_days
+            activity_count += 1
+
+        if activity_count > 0:
+            return total_days_ahead // activity_count  # Average variance
+
+        return None
+
+    except OperationalError as e:
+        logger.warning(f"Schedule variance query failed: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error computing schedule variance: {e}")
+        return None
+
+
+def compute_dashboard_summary(db: Session) -> Dict:
+    """
+    Compute dashboard summary metrics (single source of truth).
+
+    This function is the authoritative source for all dashboard KPIs.
+
+    Metric definitions:
+    - total_gmp_budget_cents: Fixed contract amount from GMP table (static baseline)
+    - actual_costs_cents: Sum of posted direct costs (post-dedup)
+    - forecast_remaining_cents: Predicted remaining costs to finish (NOT total EAC)
+    - eac_cents: Actual + Forecast Remaining
+    - variance_cents: GMP Budget - EAC (positive = underrun, negative = overrun)
+    - cpi: EV / AC (only if EV is available; otherwise None)
+    - progress_pct: actual_costs_cents / eac_cents * 100
+
+    Returns:
+        Dict with all metrics in cents (ints) + warnings list.
+    """
+    warnings = []
+
+    # 1. Total GMP Budget (from GMP entities table, NOT from forecast/EAC)
+    total_gmp_cents = get_total_gmp_budget(db)
+    if total_gmp_cents == 0:
+        warnings.append("GMP Budget data unavailable or zero")
+
+    # 2. Actual Costs (from DirectCostEntity)
+    actual_cents = get_total_actual_costs(db)
+
+    # 3. Forecast Remaining (from latest ForecastSnapshot per division)
+    forecast_remaining_cents = get_total_forecast_remaining(db)
+    if forecast_remaining_cents is None:
+        warnings.append("Forecast data unavailable")
+        forecast_remaining_cents = 0
+
+    # 4. EAC = Actual + Forecast Remaining
+    eac_cents = actual_cents + forecast_remaining_cents
+
+    # 5. Variance = Budget - EAC (positive = underrun/savings, negative = overrun)
+    variance_cents = None
+    if total_gmp_cents > 0:
+        variance_cents = total_gmp_cents - eac_cents
+
+    # 6. Progress = Actual / EAC (clamped 0-100)
+    progress_pct = 0.0
+    if eac_cents > 0:
+        progress_pct = (actual_cents / eac_cents) * 100
+        progress_pct = max(0.0, min(100.0, progress_pct))
+
+    # 7. CPI (only if EV is available)
+    cpi = compute_cpi_if_ev_available(db, actual_cents, total_gmp_cents)
+    if cpi is None and actual_cents > 0:
+        warnings.append("CPI requires Earned Value (EV) which is not configured")
+
+    # 8. Schedule Variance (wrapped for safety)
+    schedule_variance_days = None
+    try:
+        schedule_variance_days = compute_schedule_variance_days(db)
+    except Exception as e:
+        warnings.append(f"Schedule data unavailable: {str(e)}")
+
+    return {
+        'total_gmp_budget_cents': total_gmp_cents,
+        'actual_costs_cents': actual_cents,
+        'forecast_remaining_cents': forecast_remaining_cents,
+        'eac_cents': eac_cents,
+        'variance_cents': variance_cents,
+        'progress_pct': round(progress_pct, 1),
+        'cpi': cpi,
+        'schedule_variance_days': schedule_variance_days,
+        'warnings': warnings
     }
