@@ -8,7 +8,7 @@ Implements repository pattern for Schedule operations with:
 - Earned value calculations
 """
 from typing import List, Optional, Dict
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -247,7 +247,7 @@ class ScheduleRepository(BaseRepository[ScheduleActivity]):
             schedule_activity_id=activity_id,
             gmp_division=gmp_division,
             weight=weight,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         self.session.add(mapping)
         return mapping

@@ -5,7 +5,7 @@ Supports weekly and monthly time buckets with full audit trail.
 
 All monetary values in integer cents.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Any, Tuple
 from sqlalchemy.orm import Session
 import pandas as pd
@@ -854,7 +854,7 @@ class ForecastManager:
         # Create new snapshot
         snapshot = ForecastSnapshot(
             gmp_division=gmp_division,
-            snapshot_date=datetime.utcnow(),
+            snapshot_date=datetime.now(timezone.utc),
             bac_cents=bac_cents,
             ac_cents=ac_cents,
             ev_cents=ev_cents,
@@ -1000,7 +1000,7 @@ class ForecastManager:
 
         if old_method != method:
             config.method = method
-            config.updated_at = datetime.utcnow()
+            config.updated_at = datetime.now(timezone.utc)
             self.db.commit()
 
             self._log_audit(
@@ -1032,7 +1032,7 @@ class ForecastManager:
                     changes.append(f"{key}: {old_value} -> {value}")
 
         if changes:
-            config.updated_at = datetime.utcnow()
+            config.updated_at = datetime.now(timezone.utc)
             self.db.commit()
 
             self._log_audit(
@@ -1147,5 +1147,5 @@ def compute_project_rollup(db: Session) -> Dict[str, Any]:
         'total_var_cents': total_var,
         'overall_cpi': round(overall_cpi, 4) if overall_cpi else None,
         'by_division': by_division,
-        'as_of': datetime.utcnow().isoformat()
+        'as_of': datetime.now(timezone.utc).isoformat()
     }

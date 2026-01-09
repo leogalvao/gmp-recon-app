@@ -8,7 +8,7 @@ Implements repository pattern for GMP operations with:
 """
 import uuid
 from typing import List, Optional, Dict
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -130,8 +130,8 @@ class GMPRepository(BaseRepository[GMP]):
             zone=zone,
             original_amount_cents=original_amount_cents,
             description=description,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
 
         self.add(gmp)
@@ -156,7 +156,7 @@ class GMPRepository(BaseRepository[GMP]):
             raise GMPNotFoundError(str(gmp_id))
 
         gmp.description = description
-        gmp.updated_at = datetime.utcnow()
+        gmp.updated_at = datetime.now(timezone.utc)
         return gmp
 
     # Computed field helpers

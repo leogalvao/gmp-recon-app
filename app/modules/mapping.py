@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 from rapidfuzz import fuzz, process
 from sqlalchemy.orm import Session
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..models import BudgetToGMP, DirectToBudget, Allocation, MappingAudit
 from ..config import get_config
@@ -386,7 +386,7 @@ def save_mapping(db: Session, table: str, data: Dict, user: str = 'system') -> D
     Returns:
         Dict with 'action' ('created' or 'updated') and 'id' (record ID)
     """
-    timestamp = datetime.utcnow()
+    timestamp = datetime.now(timezone.utc)
     action_taken = 'created'
     record_id = None
 

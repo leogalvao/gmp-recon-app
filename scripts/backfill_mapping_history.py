@@ -11,7 +11,7 @@ Usage:
 import argparse
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 
 # Add parent directory to path for imports
@@ -89,7 +89,7 @@ def backfill_mapping_feedback(db, dry_run: bool = False):
             continue
 
         # Use the earliest record's timestamp
-        earliest = min(records, key=lambda r: r.created_at or datetime.utcnow())
+        earliest = min(records, key=lambda r: r.created_at or datetime.now(timezone.utc))
 
         feedback = MappingFeedback(
             vendor_normalized=vendor_norm,
@@ -98,7 +98,7 @@ def backfill_mapping_feedback(db, dry_run: bool = False):
             was_override=False,  # Historical records are treated as non-overrides
             confidence_at_suggestion=earliest.confidence,
             user_id='backfill',
-            created_at=earliest.created_at or datetime.utcnow()
+            created_at=earliest.created_at or datetime.now(timezone.utc)
         )
 
         if not dry_run:
@@ -140,7 +140,7 @@ def backfill_budget_match_stats(db, dry_run: bool = False):
         if existing:
             if not dry_run:
                 existing.total_matches = count
-                existing.last_updated = datetime.utcnow()
+                existing.last_updated = datetime.now(timezone.utc)
             updated += 1
         else:
             stats = BudgetMatchStats(
@@ -148,7 +148,7 @@ def backfill_budget_match_stats(db, dry_run: bool = False):
                 total_matches=count,
                 override_count=0,
                 trust_score=1.0,
-                last_updated=datetime.utcnow()
+                last_updated=datetime.now(timezone.utc)
             )
             if not dry_run:
                 db.add(stats)
@@ -198,7 +198,7 @@ def main():
 
     print("Backfill Mapping History")
     print("=" * 60)
-    print(f"Started at: {datetime.utcnow().isoformat()}")
+    print(f"Started at: {datetime.now(timezone.utc).isoformat()}")
 
     db = SessionLocal()
 

@@ -8,7 +8,7 @@ Implements repository pattern for Budget operations with:
 """
 import uuid
 from typing import List, Optional, Dict
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -212,8 +212,8 @@ class BudgetRepository(BaseRepository[BudgetEntity]):
             zone=zone,
             description=description,
             committed_cents=committed_cents,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
 
         self.add(budget)
@@ -256,7 +256,7 @@ class BudgetRepository(BaseRepository[BudgetEntity]):
         )
 
         budget.current_budget_cents = new_amount_cents
-        budget.updated_at = datetime.utcnow()
+        budget.updated_at = datetime.now(timezone.utc)
         return budget
 
     def update_zone(self, budget_id: int, zone: str) -> BudgetEntity:
@@ -278,7 +278,7 @@ class BudgetRepository(BaseRepository[BudgetEntity]):
             raise BudgetNotFoundError(str(budget_id))
 
         budget.zone = zone
-        budget.updated_at = datetime.utcnow()
+        budget.updated_at = datetime.now(timezone.utc)
         return budget
 
     def delete_budget(self, budget_id: int) -> None:
@@ -374,5 +374,5 @@ class BudgetRepository(BaseRepository[BudgetEntity]):
         """
         count = self.session.query(BudgetEntity).filter(
             BudgetEntity.id.in_(budget_ids)
-        ).update({'zone': zone, 'updated_at': datetime.utcnow()}, synchronize_session=False)
+        ).update({'zone': zone, 'updated_at': datetime.now(timezone.utc)}, synchronize_session=False)
         return count

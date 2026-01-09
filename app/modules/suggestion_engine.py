@@ -18,7 +18,7 @@ import re
 import json
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 from rapidfuzz import fuzz
@@ -857,7 +857,7 @@ def cache_suggestions(
     from sqlalchemy.dialects.sqlite import insert
 
     cached = 0
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     for dc_id, suggs in suggestions.items():
         top_score = suggs[0]['total_score'] if suggs else 0.0
@@ -978,7 +978,7 @@ def record_mapping_feedback(
         suggested_budget_code=suggested_budget_code if was_override else None,
         confidence_at_suggestion=suggestion_score,
         user_id=user_id,
-        created_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc)
     )
 
     db.add(feedback)
@@ -998,7 +998,7 @@ def update_budget_match_stats(
     suggested_budget_code: Optional[str]
 ):
     """Update match statistics for budget codes involved in a mapping."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Increment selected budget's match count
     selected_stats = db.query(BudgetMatchStats).filter(

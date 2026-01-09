@@ -5,7 +5,7 @@ Tests compute_dashboard_summary and related functions.
 import pytest
 import sys
 from unittest.mock import patch, MagicMock
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 sys.path.insert(0, '.')
 
 from fastapi.testclient import TestClient
@@ -108,7 +108,7 @@ def create_forecast_snapshot(db, gmp_division, eac_cents, etc_cents, ac_cents=0,
     """Helper to create a ForecastSnapshot."""
     snapshot = ForecastSnapshot(
         gmp_division=gmp_division,
-        snapshot_date=datetime.utcnow(),
+        snapshot_date=datetime.now(timezone.utc),
         bac_cents=eac_cents,  # BAC = Budget at Completion
         ac_cents=ac_cents,
         ev_cents=ev_cents,

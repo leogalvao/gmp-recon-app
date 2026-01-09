@@ -10,7 +10,7 @@ Implements SQLAlchemy event listeners for:
 These handlers ensure business rules are enforced at the ORM level.
 """
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Set
 from sqlalchemy import event, inspect
 from sqlalchemy.orm import Session
@@ -223,7 +223,7 @@ def record_audit_log(session: Session, table_name: str, record_id: int,
         old_value=json.dumps(old_value) if old_value else None,
         new_value=json.dumps(new_value) if new_value else None,
         user=user,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(timezone.utc)
     )
     session.add(audit)
 

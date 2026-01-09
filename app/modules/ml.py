@@ -6,7 +6,7 @@ Uses LinearRegression baseline with optional PyTorch MLP.
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_absolute_error
@@ -395,7 +395,7 @@ class ForecastingPipeline:
                 'model_type_east': self.models.get((division, 'east'), {}).get('type', 'none')
             }
         
-        self.last_trained = datetime.utcnow()
+        self.last_trained = datetime.now(timezone.utc)
     
     def predict(self, direct_costs_df: pd.DataFrame, budget_df: pd.DataFrame,
                 gmp_df: pd.DataFrame, as_of_date: Optional[datetime] = None) -> pd.DataFrame:

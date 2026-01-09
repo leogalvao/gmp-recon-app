@@ -8,7 +8,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional, List
 import json
 import logging
@@ -178,7 +178,7 @@ def run_nightly_train():
         run = Run(
             run_type='nightly_train',
             status='running',
-            started_at=datetime.utcnow()
+            started_at=datetime.now(timezone.utc)
         )
         db.add(run)
         db.commit()
@@ -196,13 +196,13 @@ def run_nightly_train():
         )
         
         run.status = 'completed'
-        run.finished_at = datetime.utcnow()
+        run.finished_at = datetime.now(timezone.utc)
         run.notes = json.dumps(pipeline.get_training_status())
         db.commit()
     except Exception as e:
         run.status = 'failed'
         run.notes = str(e)
-        run.finished_at = datetime.utcnow()
+        run.finished_at = datetime.now(timezone.utc)
         db.commit()
     finally:
         db.close()
@@ -552,7 +552,7 @@ def get_schedule_variances() -> Dict[str, Dict]:
     Returns dict of trade -> {expected, spent, variance, variance_pct, status}
     """
     from pathlib import Path
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     data_dir = Path(__file__).parent.parent / "data" / "raw"
     schedule_file = data_dir / "schedule.csv"
@@ -1647,7 +1647,7 @@ async def resolve_duplicate(
             dup.excluded_from_actuals = False
         
         dup.resolved = True
-        dup.resolved_at = datetime.utcnow()
+        dup.resolved_at = datetime.now(timezone.utc)
         dup.resolved_by = "user"
         db.commit()
     
@@ -1844,7 +1844,7 @@ async def save_settings(
     settings.eac_mode_when_commitments = form_data.get('eac_mode', 'max')
     settings.gmp_scope_notes = form_data.get('gmp_scope_notes', '')
     settings.gmp_scope_confirmed = form_data.get('gmp_scope_confirmed') == 'on'
-    settings.updated_at = datetime.utcnow()
+    settings.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     
@@ -1857,7 +1857,7 @@ async def trigger_recompute(db: Session = Depends(get_db)):
     run = Run(
         run_type='recompute',
         status='running',
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(timezone.utc),
         file_hashes=json.dumps(get_file_hashes())
     )
     db.add(run)
@@ -1879,11 +1879,11 @@ async def trigger_recompute(db: Session = Depends(get_db)):
         )
         
         run.status = 'completed'
-        run.finished_at = datetime.utcnow()
+        run.finished_at = datetime.now(timezone.utc)
     except Exception as e:
         run.status = 'failed'
         run.notes = str(e)
-        run.finished_at = datetime.utcnow()
+        run.finished_at = datetime.now(timezone.utc)
     
     db.commit()
     
@@ -2431,7 +2431,7 @@ async def update_side_config(
             raise HTTPException(status_code=400, detail="allocation_weight must be between 0 and 1")
         config.allocation_weight = weight
 
-    config.updated_at = datetime.utcnow()
+    config.updated_at = datetime.now(timezone.utc)
     db.commit()
 
     return {
@@ -2969,7 +2969,7 @@ async def update_mapping_side(
 
         old_side = mapping.side
         mapping.side = new_side
-        mapping.updated_at = datetime.utcnow()
+        mapping.updated_at = datetime.now(timezone.utc)
         db.commit()
 
         return {
@@ -2989,7 +2989,7 @@ async def update_mapping_side(
 
         old_side = mapping.side
         mapping.side = new_side
-        mapping.updated_at = datetime.utcnow()
+        mapping.updated_at = datetime.now(timezone.utc)
         db.commit()
 
         return {
@@ -3065,7 +3065,7 @@ async def bulk_update_mapping_side(
                 BudgetToGMP.id.in_(mapping_ids)
             ).update({
                 BudgetToGMP.side: new_side,
-                BudgetToGMP.updated_at: datetime.utcnow()
+                BudgetToGMP.updated_at: datetime.now(timezone.utc)
             }, synchronize_session=False)
         else:
             # Update by filter
@@ -3079,7 +3079,7 @@ async def bulk_update_mapping_side(
 
             updated_count = query.update({
                 BudgetToGMP.side: new_side,
-                BudgetToGMP.updated_at: datetime.utcnow()
+                BudgetToGMP.updated_at: datetime.now(timezone.utc)
             }, synchronize_session=False)
 
     elif mapping_type == "direct_to_budget":
@@ -3089,7 +3089,7 @@ async def bulk_update_mapping_side(
                 DirectToBudget.id.in_(mapping_ids)
             ).update({
                 DirectToBudget.side: new_side,
-                DirectToBudget.updated_at: datetime.utcnow()
+                DirectToBudget.updated_at: datetime.now(timezone.utc)
             }, synchronize_session=False)
         else:
             # Update by filter
@@ -3101,7 +3101,7 @@ async def bulk_update_mapping_side(
 
             updated_count = query.update({
                 DirectToBudget.side: new_side,
-                DirectToBudget.updated_at: datetime.utcnow()
+                DirectToBudget.updated_at: datetime.now(timezone.utc)
             }, synchronize_session=False)
     else:
         raise HTTPException(
@@ -3426,7 +3426,7 @@ async def refresh_forecast(
     )
 
     # Generate time periods (both weekly and monthly)
-    as_of_date = settings.get('as_of_date') or loader.max_transaction_date or datetime.utcnow()
+    as_of_date = settings.get('as_of_date') or loader.max_transaction_date or datetime.now(timezone.utc)
     if isinstance(as_of_date, str):
         as_of_date = pd.to_datetime(as_of_date)
     if hasattr(as_of_date, 'to_pydatetime'):
@@ -4084,7 +4084,7 @@ async def get_schedule_variance_drilldown(trade: str, db: Session = Depends(get_
     Shows activities, expected vs actual costs, and timeline.
     """
     from pathlib import Path
-    from datetime import datetime
+    from datetime import datetime, timezone
     from urllib.parse import unquote
 
     trade = unquote(trade)
@@ -4455,10 +4455,10 @@ async def bulk_assign_schedule_zone(
             training_round = TrainingRound(
                 uuid=str(uuid_lib.uuid4()),
                 project_id=project_id,
-                triggered_at=datetime.utcnow(),
+                triggered_at=datetime.now(timezone.utc),
                 trigger_type='user_feedback',  # Zone assignment is user refinement
                 status='completed',
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
                 linkage_score=new_linkage_score * 100,  # Store as percentage
                 previous_round_id=previous_round.id if previous_round else None,
                 training_notes=f"User assigned zone '{zone}' to {updated_count} schedule activities"
@@ -4772,7 +4772,7 @@ async def bulk_assign_zone(
 
             if budget_mapping:
                 budget_mapping.side = zone
-                budget_mapping.updated_at = datetime.utcnow()
+                budget_mapping.updated_at = datetime.now(timezone.utc)
                 updated_count += 1
 
                 # Try to auto-link to GMP if not already linked
@@ -4796,7 +4796,7 @@ async def bulk_assign_zone(
 
             if budget_entity:
                 budget_entity.zone = zone
-                budget_entity.updated_at = datetime.utcnow()
+                budget_entity.updated_at = datetime.now(timezone.utc)
 
         except Exception as e:
             logger.error(f"Failed to update budget {budget_id}: {e}")
@@ -4873,7 +4873,7 @@ async def trigger_project_training(
     training_round = TrainingRound(
         uuid=str(uuid_lib.uuid4()),
         project_id=project_id,
-        triggered_at=datetime.utcnow(),
+        triggered_at=datetime.now(timezone.utc),
         trigger_type='manual',
         status='running',
         previous_round_id=previous_round.id if previous_round else None
@@ -4934,7 +4934,7 @@ async def trigger_project_training(
         total_eac_cents = int(recon_df['eac_cents'].sum()) if 'eac_cents' in recon_df.columns else 0
 
         # Step 4: Save forecast snapshots by zone
-        as_of_date = settings.get('as_of_date') or datetime.utcnow().date()
+        as_of_date = settings.get('as_of_date') or datetime.now(timezone.utc).date()
         zones = ['EAST', 'WEST', 'SHARED']
 
         # Generate weekly periods for the next year
@@ -4979,7 +4979,7 @@ async def trigger_project_training(
 
         # Update training round with results
         training_round.status = 'completed'
-        training_round.completed_at = datetime.utcnow()
+        training_round.completed_at = datetime.now(timezone.utc)
         training_round.linkage_score = linkage_score
         training_round.budget_coverage = budget_coverage
         training_round.cost_coverage = (linked_costs / total_costs * 100) if total_costs > 0 else 0.0
@@ -5002,7 +5002,7 @@ async def trigger_project_training(
     except Exception as e:
         training_round.status = 'failed'
         training_round.error_message = str(e)
-        training_round.completed_at = datetime.utcnow()
+        training_round.completed_at = datetime.now(timezone.utc)
         db.commit()
         logger.error(f"Training failed: {e}")
         raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
@@ -5156,7 +5156,7 @@ async def create_change_order(
 ):
     """Create a new change order."""
     import uuid as uuid_lib
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     # Verify GMP exists
     gmp = db.query(GMP).filter(GMP.id == request.gmp_id).first()
@@ -5219,13 +5219,13 @@ async def update_change_order(
             raise HTTPException(status_code=400, detail=f"Invalid status: {request.status}")
         change_order.status = request.status
         if request.status == 'approved':
-            change_order.approved_date = datetime.utcnow().date()
+            change_order.approved_date = datetime.now(timezone.utc).date()
     if request.approved_by is not None:
         change_order.approved_by = request.approved_by
     if request.rejection_reason is not None:
         change_order.rejection_reason = request.rejection_reason
 
-    change_order.updated_at = datetime.utcnow()
+    change_order.updated_at = datetime.now(timezone.utc)
     db.commit()
 
     return {"message": f"Change order {change_order.number} updated"}
@@ -5246,9 +5246,9 @@ async def approve_change_order(
         raise HTTPException(status_code=400, detail="Change order already approved")
 
     change_order.status = 'approved'
-    change_order.approved_date = datetime.utcnow().date()
+    change_order.approved_date = datetime.now(timezone.utc).date()
     change_order.approved_by = approved_by
-    change_order.updated_at = datetime.utcnow()
+    change_order.updated_at = datetime.now(timezone.utc)
 
     db.commit()
 

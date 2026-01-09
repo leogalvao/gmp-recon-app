@@ -8,7 +8,7 @@ Implements repository pattern for Direct Cost operations with:
 """
 import uuid
 from typing import List, Optional, Dict, Tuple
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from collections import defaultdict
 from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
@@ -159,8 +159,8 @@ class DirectCostRepository(BaseRepository[DirectCostEntity]):
             allocation_method=allocation_method,
             zone=zone,
             source_row_id=source_row_id,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
 
         self.add(cost)
@@ -203,7 +203,7 @@ class DirectCostRepository(BaseRepository[DirectCostEntity]):
 
         cost.mapped_budget_id = new_budget_id
         cost.zone = zone
-        cost.updated_at = datetime.utcnow()
+        cost.updated_at = datetime.now(timezone.utc)
 
         return cost, old_budget_id
 
@@ -226,7 +226,7 @@ class DirectCostRepository(BaseRepository[DirectCostEntity]):
             raise DirectCostNotFoundError(str(cost_id))
 
         cost.gross_amount_cents = new_amount_cents
-        cost.updated_at = datetime.utcnow()
+        cost.updated_at = datetime.now(timezone.utc)
         return cost
 
     def bulk_map(
@@ -257,7 +257,7 @@ class DirectCostRepository(BaseRepository[DirectCostEntity]):
                     affected_budgets.add(budget_id)
 
                 cost.mapped_budget_id = budget_id
-                cost.updated_at = datetime.utcnow()
+                cost.updated_at = datetime.now(timezone.utc)
 
                 # Update zone from budget
                 if budget_id:
