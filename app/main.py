@@ -416,14 +416,18 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         logger.info(f"Recon totals - GMP: {total_gmp_from_recon}, Actual: {total_actual_from_recon}, EAC: {total_eac_from_recon}")
 
         # Build division cards with health status
+        # Use pre-formatted values from format_for_display where available
         division_cards = []
         for row in recon_rows:
             gmp_div = row['gmp_division']
-            # Use raw cents values from format_for_display output
-            gmp_cents = row.get('gmp_amount_raw', 0) or 0
-            actual_cents = (row.get('actual_west_raw', 0) or 0) + (row.get('actual_east_raw', 0) or 0)
-            # Use EAC from reconciliation data (not forecast_rollup)
-            eac_cents = row.get('eac_total_raw', 0) or 0
+
+            # Get raw cents values (convert to int to handle numpy types)
+            gmp_cents = int(row.get('gmp_amount_raw', 0) or 0)
+            actual_west = int(row.get('actual_west_raw', 0) or 0)
+            actual_east = int(row.get('actual_east_raw', 0) or 0)
+            actual_cents = actual_west + actual_east
+            eac_cents = int(row.get('eac_total_raw', 0) or 0)
+
             # Calculate variance as GMP - EAC
             variance_cents = gmp_cents - eac_cents
 
@@ -445,16 +449,17 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
             else:
                 health = 'healthy'
 
+            # Use pre-formatted display values from row, or format raw values
             division_cards.append({
                 'name': gmp_div,
                 'gmp_cents': gmp_cents,
-                'gmp_display': cents_to_display(gmp_cents),
+                'gmp_display': row.get('gmp_amount') or cents_to_display(gmp_cents),
                 'actual_cents': actual_cents,
-                'actual_display': cents_to_display(actual_cents),
+                'actual_display': row.get('actual_total') or cents_to_display(actual_cents),
                 'eac_cents': eac_cents,
-                'eac_display': cents_to_display(eac_cents),
+                'eac_display': row.get('eac_total') or cents_to_display(eac_cents),
                 'variance_cents': variance_cents,
-                'variance_display': cents_to_display(variance_cents),
+                'variance_display': row.get('surplus_or_overrun') or cents_to_display(variance_cents),
                 'pct_spent': pct_spent,
                 'cpi': cpi,
                 'health': health,
