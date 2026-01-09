@@ -528,8 +528,7 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
             'warnings': dashboard_summary['warnings']
         }
 
-        return templates.TemplateResponse("dashboard.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "dashboard.html", {
             "project_metrics": project_metrics,
             "division_cards": division_cards,
             "health_counts": health_counts,
@@ -539,8 +538,7 @@ async def dashboard_page(request: Request, db: Session = Depends(get_db)):
         })
     except Exception as e:
         logger.error(f"Dashboard error: {e}")
-        return templates.TemplateResponse("error.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "error.html", {
             "error": str(e),
             "active_page": "dashboard"
         })
@@ -639,8 +637,7 @@ async def gmp_page(
             row['schedule_variance_status'] = var_data.get('status', 'on_track')
             row['schedule_expected'] = var_data.get('expected', 0)
 
-        return templates.TemplateResponse("gmp.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "gmp.html", {
             "rows": result['recon_rows'],
             "summary": result['summary'],
             "tie_outs": result['tie_outs'],
@@ -653,8 +650,7 @@ async def gmp_page(
             "active_page": "gmp"
         })
     except Exception as e:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "error.html", {
             "error": str(e),
             "active_page": "gmp"
         })
@@ -792,8 +788,7 @@ async def forecast_project_page(
         'is_locked': False
     }
 
-    return templates.TemplateResponse("forecast.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "forecast.html", {
         "gmp_division": "All Divisions" if not selected_divisions else ", ".join(selected_divisions),
         "granularity": granularity,
         "forecast": forecast,
@@ -939,8 +934,7 @@ async def forecast_page(
                 ]
             }
 
-    return templates.TemplateResponse("forecast.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "forecast.html", {
         "gmp_division": gmp_division,
         "granularity": granularity,
         "forecast": forecast,
@@ -1190,8 +1184,7 @@ async def mappings_page(
     # Limit for initial display (pagination)
     unmapped_direct = all_unmapped_direct[:initial_limit]
 
-    return templates.TemplateResponse("mappings.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "mappings.html", {
         "active_tab": tab,
         "side_filter": side_filter,
         "available_sides": available_sides,
@@ -1623,8 +1616,7 @@ async def duplicates_page(request: Request, db: Session = Depends(get_db)):
     formatted_dups = format_duplicates_for_display(duplicates, direct_costs_df)
     summary = get_duplicates_summary(duplicates)
     
-    return templates.TemplateResponse("duplicates.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "duplicates.html", {
         "duplicates": formatted_dups,
         "summary": summary,
         "active_page": "duplicates"
@@ -1705,8 +1697,7 @@ async def data_health_page(request: Request, db: Session = Depends(get_db)):
         'total_direct_costs': cents_to_display(direct_costs_df['amount_cents'].sum())
     }
     
-    return templates.TemplateResponse("data_health.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "data_health.html", {
         "issues": issues,
         "stats": stats,
         "active_page": "data-health"
@@ -1787,8 +1778,7 @@ async def schedule_page(request: Request, db: Session = Depends(get_db)):
     # Weighted average progress (P6-style)
     avg_progress = round(weighted_progress_sum / total_weight * 100) if total_weight > 0 else 0
 
-    return templates.TemplateResponse("schedule.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "schedule.html", {
         "activities": activities_data,
         "gmp_divisions": gmp_divisions,
         "total_activities": total_activities,
@@ -1811,8 +1801,7 @@ async def settings_page(request: Request, db: Session = Depends(get_db)):
     # Get last run info
     last_run = db.query(Run).order_by(Run.started_at.desc()).first()
     
-    return templates.TemplateResponse("settings.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "settings.html", {
         "settings": settings,
         "max_transaction_date": data_loader.max_transaction_date,
         "last_run": last_run,
@@ -5310,8 +5299,7 @@ async def ingest_csv(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    return templates.TemplateResponse("error.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "error.html", {
         "error": str(exc),
         "active_page": ""
     }, status_code=500)
