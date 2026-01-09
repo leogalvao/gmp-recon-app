@@ -9,7 +9,7 @@ Implements:
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.models import get_db
@@ -61,8 +61,7 @@ class GMPResponse(BaseModel):
     created_at: Optional[str]
     updated_at: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GMPSummaryResponse(BaseModel):
