@@ -195,17 +195,21 @@ def prepare_features(
     # Calculate remaining as target (GMP - cumsum at each point)
     weekly_agg['remaining_west'] = weekly_agg['gmp_amount_cents'] / 2 - weekly_agg['cumsum_west']
     weekly_agg['remaining_east'] = weekly_agg['gmp_amount_cents'] / 2 - weekly_agg['cumsum_east']
-    
+
+    # Reset index after sort_values to ensure clean sequential indexing
+    # This prevents "Unalignable boolean Series" errors in train() and predict()
+    weekly_agg = weekly_agg.reset_index(drop=True)
+
     feature_cols = ['month', 'quarter', 'day_of_year', 'week_of_year', 'year',
                     'budget_ratio', 'cumsum_west', 'cumsum_east', 'cumsum_total']
-    
+
     metadata = {
         'feature_cols': feature_cols,
         'target_cols': ['remaining_west', 'remaining_east'],
         'n_samples': len(weekly_agg),
         'n_divisions': weekly_agg['gmp_division'].nunique()
     }
-    
+
     return weekly_agg, metadata
 
 
@@ -351,11 +355,13 @@ class ForecastingPipeline:
         }
         
         for division in features_df['gmp_division'].unique():
-            div_data = features_df[features_df['gmp_division'] == division]
-            
+            # Use .values to avoid index alignment issues with boolean indexing
+            mask = (features_df['gmp_division'] == division).values
+            div_data = features_df[mask]
+
             if len(div_data) < 3:
                 continue
-            
+
             X = div_data[feature_cols].values
             
             # Handle NaN values
@@ -419,11 +425,13 @@ class ForecastingPipeline:
         
         for division in gmp_df['GMP'].unique():
             # Get latest data point for this division
-            div_data = features_df[features_df['gmp_division'] == division]
-            
+            # Use .values to avoid index alignment issues with boolean indexing
+            mask = (features_df['gmp_division'] == division).values
+            div_data = features_df[mask]
+
             pred_west = 0
             pred_east = 0
-            
+
             if len(div_data) > 0:
                 latest = div_data.iloc[-1]
                 X = latest[feature_cols].values.reshape(1, -1)
