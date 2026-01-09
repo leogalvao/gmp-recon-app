@@ -15,8 +15,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass, field
 import logging
 
-from ...forecasting.models.lstm_forecaster import LSTMForecaster
-from ...forecasting.models.transformer_forecaster import TransformerForecaster
 from ...forecasting.models.base_model import BuildingFeatures, BaseForecaster
 from .feature_engineering import FeatureEngineer
 
@@ -114,12 +112,16 @@ class TrainingPipeline:
     def _initialize_model(self) -> None:
         """Initialize model based on architecture configuration."""
         if self.config.architecture == "lstm":
+            # Lazy import to avoid TensorFlow dependency at module load time
+            from ...forecasting.models.lstm_forecaster import LSTMForecaster
             self.model = LSTMForecaster(
                 sequence_length=self.config.lookback_months,
                 lstm_units=self.config.model_params.get('units', 64),
                 dropout_rate=self.config.model_params.get('dropout', 0.2),
             )
         elif self.config.architecture == "transformer":
+            # Lazy import to avoid TensorFlow dependency at module load time
+            from ...forecasting.models.transformer_forecaster import TransformerForecaster
             self.model = TransformerForecaster(
                 sequence_length=self.config.lookback_months,
                 forecast_horizon=self.config.forecast_horizon,

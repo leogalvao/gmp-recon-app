@@ -9,13 +9,15 @@ This module provides:
 Models:
 - LSTMForecaster: Bidirectional LSTM with GMM output
 - TransformerForecaster: Temporal Fusion Transformer with quantile outputs
+
+Note: LSTM and Transformer models use lazy imports to avoid loading TensorFlow
+at import time. Use get_* functions to access these classes.
 """
 
 from .models.base_model import BaseForecaster, BuildingFeatures, ForecastResult
-from .models.lstm_forecaster import LSTMForecaster
-from .models.transformer_forecaster import TransformerForecaster
+from .models import get_lstm_forecaster, get_transformer_forecaster
 
 __all__ = [
     'BaseForecaster', 'BuildingFeatures', 'ForecastResult',
-    'LSTMForecaster', 'TransformerForecaster',
+    'get_lstm_forecaster', 'get_transformer_forecaster',
 ]
