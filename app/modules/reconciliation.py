@@ -102,7 +102,9 @@ def allocate_amount_east_west(
 
     # Look up breakdown allocation if available
     if breakdown_df is not None and not breakdown_df.empty:
-        matched = breakdown_df[breakdown_df['gmp_division'] == gmp_division]
+        # Use .values to avoid index alignment issues with boolean indexing
+        mask = (breakdown_df['gmp_division'] == gmp_division).values
+        matched = breakdown_df[mask]
         if not matched.empty:
             pct_east = matched.iloc[0]['pct_east']
             pct_west = matched.iloc[0]['pct_west']
@@ -183,7 +185,9 @@ def aggregate_actuals_by_gmp(
             east, west = allocate_amount_east_west(total, gmp_div, breakdown_df)
         else:
             # Use existing row-level splits if available
-            div_data = merged[merged['gmp_division'] == gmp_div]
+            # Use .values to avoid index alignment issues with boolean indexing
+            mask = (merged['gmp_division'] == gmp_div).values
+            div_data = merged[mask]
             if 'amount_west' in div_data.columns and 'amount_east' in div_data.columns:
                 # Use pre-computed splits but ensure they tie out with LRM
                 raw_east = int(div_data['amount_east'].sum())
