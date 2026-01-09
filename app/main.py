@@ -65,6 +65,7 @@ from app.modules.forecasting import (
 )
 from app.models import ForecastConfig, ForecastSnapshot, ForecastPeriod, ForecastAuditLog
 from app.modules.csrf import csrf, get_or_create_csrf_token
+from app.api.v1 import api_router as v1_router
 
 
 # Initialize FastAPI app
@@ -73,6 +74,9 @@ app = FastAPI(
     description="Reconcile Procore Direct Costs against GMP funding via Budget mapping",
     version="1.0.0"
 )
+
+# Include v1 API routes for cost management hierarchy
+app.include_router(v1_router)
 
 # Setup templates and static files
 BASE_DIR = Path(__file__).parent
