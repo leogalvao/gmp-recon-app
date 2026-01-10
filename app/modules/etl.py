@@ -313,6 +313,23 @@ def load_budget_csv(path: Optional[Path] = None) -> pd.DataFrame:
     df['division_key'] = df['Cost Code Tier 2'].apply(extract_division_key)
     df['budget_id'] = df.index
 
+    # Data Model Spec v2.1.1: Add budget_code_base (derived key for direct_cost join)
+    df['budget_code_base'] = df['base_code']  # Same as base_code for spec compliance
+
+    # Data Model Spec v2.1.1: Extract cost_type from Type column if present
+    if 'Type' in df.columns:
+        df['cost_type'] = df['Type'].fillna('').str.strip().str.upper().str[:1]  # L/M/S/O
+    else:
+        df['cost_type'] = ''
+
+    # Data Model Spec v2.1.1: Extract sub_job from Sub Job column if present
+    if 'Sub Job' in df.columns:
+        df['sub_job'] = df['Sub Job'].fillna('').astype(str).str.strip()
+    elif 'SubJob' in df.columns:
+        df['sub_job'] = df['SubJob'].fillna('').astype(str).str.strip()
+    else:
+        df['sub_job'] = ''
+
     return df
 
 
@@ -1096,6 +1113,9 @@ def load_schedule_csv(path: Optional[Path] = None) -> pd.DataFrame:
     # Filter out empty task names
     result = result[result['task_name'].str.len() > 0].copy()
 
+    # Data Model Spec v2.1.1: Add activity_name (mirrors task_name for spec compliance)
+    result['activity_name'] = result['task_name']
+
     return result
 
 
@@ -1239,6 +1259,23 @@ def load_budget_csv_safe(path: Optional[Path] = None) -> ETLResult:
         df['base_code'] = df['Budget Code'].apply(normalize_code)
         df['division_key'] = df['Cost Code Tier 2'].apply(extract_division_key)
         df['budget_id'] = df.index
+
+        # Data Model Spec v2.1.1: Add budget_code_base (derived key for direct_cost join)
+        df['budget_code_base'] = df['base_code']
+
+        # Data Model Spec v2.1.1: Extract cost_type from Type column if present
+        if 'Type' in df.columns:
+            df['cost_type'] = df['Type'].fillna('').str.strip().str.upper().str[:1]
+        else:
+            df['cost_type'] = ''
+
+        # Data Model Spec v2.1.1: Extract sub_job from Sub Job column if present
+        if 'Sub Job' in df.columns:
+            df['sub_job'] = df['Sub Job'].fillna('').astype(str).str.strip()
+        elif 'SubJob' in df.columns:
+            df['sub_job'] = df['SubJob'].fillna('').astype(str).str.strip()
+        else:
+            df['sub_job'] = ''
 
         result.data = df
         result.valid_rows = len(df)

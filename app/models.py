@@ -463,6 +463,8 @@ class GMP(Base):
     Guaranteed Maximum Price allocation.
     The funding source, split by Division AND Zone.
     INVARIANT: Σ(Budget.current_amount) <= (GMP.original + Σ(ApprovedCOs.amount))
+
+    Data Model Spec v2.1.1: Maps to gmp_division entity
     """
     __tablename__ = "gmp_entities"
 
@@ -472,6 +474,7 @@ class GMP(Base):
     division = Column(String(200), nullable=False, index=True)  # CSI Division (e.g., '03-Concrete')
     zone = Column(String(10), nullable=False, index=True)  # EAST, WEST, SHARED
     original_amount_cents = Column(Integer, nullable=False)  # Immutable base contract value
+    is_hard_cost = Column(Boolean, default=True, index=True)  # True for hard costs, False for soft costs
     description = Column(Text, nullable=True)
     version_id = Column(Integer, default=1)  # Optimistic locking
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -506,6 +509,11 @@ class BudgetEntity(Base):
     """
     Allocated bucket of money. Must belong to a Zone.
     INVARIANT: Budget.zone MUST MATCH GMP.zone (SPATIAL_INTEGRITY)
+
+    Data Model Spec v2.1.1: Maps to budget_line entity
+    - Added budget_code_base (derived key for direct_cost join)
+    - Added direct_cost_total_cents (for cost hierarchy constraint)
+    - Added cost_type and sub_job fields
     """
     __tablename__ = "budget_entities"
 
@@ -513,10 +521,14 @@ class BudgetEntity(Base):
     uuid = Column(String(36), unique=True, index=True, nullable=False)  # External UUID
     gmp_id = Column(Integer, ForeignKey('gmp_entities.id'), nullable=False, index=True)
     cost_code = Column(String(50), nullable=False, index=True)  # Must match Schedule Activity Code
+    budget_code_base = Column(String(50), nullable=True, index=True)  # Derived: SUBSTRING(cost_code BEFORE ".")
     description = Column(String(500), nullable=True)
     zone = Column(String(10), nullable=True, index=True)  # Nullable on ingestion, assigned via UI
     current_budget_cents = Column(Integer, nullable=False, default=0)
     committed_cents = Column(Integer, default=0)  # Committed amount (contracts)
+    direct_cost_total_cents = Column(Integer, default=0)  # Aggregated direct costs for this budget line
+    cost_type = Column(String(20), nullable=True, index=True)  # L=Labor, M=Material, S=Subcontract, O=Other
+    sub_job = Column(String(50), nullable=True, index=True)  # Sub-job identifier for regional allocation
     version_id = Column(Integer, default=1)  # Optimistic locking
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -673,20 +685,28 @@ class GMPBudgetBreakdown(Base):
     Owner's East/West funding breakdown per cost code.
     Imported from breakdown.csv and fuzzy-matched to GMP divisions.
     Used for penny-perfect allocation of actuals and forecasts.
+
+    Data Model Spec v2.1.1: Maps to regional_breakdown entity
+    - Added division_id FK for proper relationship to gmp_division
+    - Constraint: east_amount + west_amount = gmp_amount WHERE is_hard_cost = true
     """
     __tablename__ = 'gmp_budget_breakdown'
 
     id = Column(Integer, primary_key=True, index=True)
     cost_code_description = Column(String(200), nullable=False)
-    gmp_division = Column(String(200), index=True)  # Matched GMP division (null if unmatched)
-    gmp_sov_cents = Column(Integer, nullable=False)  # Total SOV in cents
-    east_funded_cents = Column(Integer, default=0)
-    west_funded_cents = Column(Integer, default=0)
+    gmp_division = Column(String(200), index=True)  # Matched GMP division name (null if unmatched)
+    division_id = Column(Integer, ForeignKey('gmp_entities.id'), nullable=True, index=True)  # FK to GMP
+    gmp_sov_cents = Column(Integer, nullable=False)  # Total SOV in cents (maps to gmp_amount)
+    east_funded_cents = Column(Integer, default=0)  # Maps to east_amount
+    west_funded_cents = Column(Integer, default=0)  # Maps to west_amount
     pct_east = Column(Float, nullable=False)  # Derived: east/sov (0.0 - 1.0)
     pct_west = Column(Float, nullable=False)  # Derived: west/sov (0.0 - 1.0)
     match_score = Column(Integer, default=0)  # Fuzzy match confidence 0-100
     source_file = Column(String(100))
     imported_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationship to GMP entity
+    gmp = relationship("GMP", backref="breakdowns")
 
 
 # =============================================================================
@@ -702,12 +722,17 @@ class ScheduleActivity(Base):
     - Both dates have " A": activity is COMPLETE (progress = 1.0)
     - Only start has " A": activity is IN_PROGRESS (progress = elapsed/duration)
     - Neither date has " A": activity is NOT_STARTED (progress = 0.0)
+
+    Data Model Spec v2.1.1: Maps to schedule_activity entity
+    - Added activity_name column (spec field name, synced with task_name)
+    - duration property added as alias for duration_days
     """
     __tablename__ = 'schedule_activities'
 
     id = Column(Integer, primary_key=True, index=True)
     row_number = Column(Integer)
     task_name = Column(String(500), nullable=False)
+    activity_name = Column(String(500), nullable=True)  # Spec-compliant field, mirrors task_name
     source_uid = Column(String(100), unique=True, nullable=True)  # P6 GUID
     activity_id = Column(String(50), index=True)
     wbs = Column(String(100), index=True)
@@ -746,18 +771,27 @@ class ScheduleActivity(Base):
     # Relationship to mappings
     mappings = relationship("ScheduleToGMPMapping", back_populates="activity", cascade="all, delete-orphan")
 
+    @property
+    def duration(self) -> int:
+        """Alias for duration_days for spec compliance."""
+        return self.duration_days
+
 
 class ScheduleToGMPMapping(Base):
     """
     Many-to-many: Schedule activities → GMP divisions with weights.
     Allows a single activity to contribute to multiple GMP divisions.
     Weights should sum to 1.0 for each activity.
+
+    Data Model Spec v2.1.1: Maps to activity_division_map entity
+    - Added zone field for spatial allocation (EAST | WEST | SHARED)
     """
     __tablename__ = 'schedule_to_gmp_mapping'
 
     id = Column(Integer, primary_key=True, index=True)
     schedule_activity_id = Column(Integer, ForeignKey('schedule_activities.id'), nullable=False)
     gmp_division = Column(String(200), nullable=False, index=True)
+    zone = Column(String(10), nullable=True, index=True)  # EAST, WEST, SHARED - for weighted progress allocation
     weight = Column(Float, default=1.0)  # 0.0-1.0, should sum to 1.0 per activity
     created_by = Column(String(100), default='system')
     created_at = Column(DateTime, default=datetime.utcnow)
