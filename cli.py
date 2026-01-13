@@ -540,6 +540,100 @@ def schedule_forecast(data_dir, epochs):
     click.echo("Variance = Actual - Expected (positive = over-spending vs schedule)")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CALIBRATION COMMANDS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@cli.command()
+@click.option('--profile', '-p', default=None,
+              type=click.Choice(['quick', 'mapping', 'forecasting', 'schedule', 'full']),
+              help='Use a predefined calibration profile')
+@click.option('--target', '-t', multiple=True, help='Specific target(s) to calibrate')
+@click.option('--auto', 'auto_detect', is_flag=True, help='Auto-detect config changes')
+@click.option('--dry-run', is_flag=True, help='Show what would be calibrated')
+@click.option('--list', 'show_list', is_flag=True, help='List available targets and profiles')
+def calibrate(profile, target, auto_detect, dry_run, show_list):
+    """Modular calibration for configuration changes.
+
+    Instead of full system retraining, calibrate only the components
+    affected by your configuration changes.
+
+    \b
+    Examples:
+        # Auto-detect config changes and calibrate
+        python cli.py calibrate --auto
+
+        # Use quick profile (no model retraining)
+        python cli.py calibrate -p quick
+
+        # Calibrate specific targets
+        python cli.py calibrate -t fuzzy_matching -t suggestion_engine
+
+        # List available options
+        python cli.py calibrate --list
+
+    \b
+    Profiles:
+        quick       - Parameter updates only (fast, ~10 seconds)
+        mapping     - GMP divisions, fuzzy matching, suggestions (~30 seconds)
+        forecasting - ML models and parameters (~5 minutes)
+        schedule    - Schedule parsing and models (~10 minutes)
+        full        - Complete system recalibration (~20 minutes)
+    """
+    from src.calibration import Calibrator, CalibrationRegistry
+
+    if show_list:
+        registry = CalibrationRegistry()
+        click.echo(click.style('\nCalibration Targets:', fg='cyan', bold=True))
+        click.echo('-' * 60)
+        for name, t in sorted(registry.get_all_targets().items()):
+            light = '(fast)' if t.is_lightweight else ''
+            click.echo(f"  {name:<28} {t.calibration_type:<20} {light}")
+
+        click.echo(click.style('\nCalibration Profiles:', fg='cyan', bold=True))
+        click.echo('-' * 60)
+        for name, p in sorted(registry.get_all_profiles().items()):
+            click.echo(f"  {name:<15} {p.description}")
+        return
+
+    calibrator = Calibrator()
+
+    if auto_detect:
+        click.echo(click.style('Auto-Detecting Configuration Changes', fg='cyan', bold=True))
+        summary = calibrator.auto_calibrate(dry_run=dry_run)
+    elif profile:
+        click.echo(click.style(f'Calibrating with profile: {profile}', fg='cyan', bold=True))
+        summary = calibrator.calibrate_profile(profile, dry_run=dry_run)
+    elif target:
+        click.echo(click.style(f'Calibrating targets: {", ".join(target)}', fg='cyan', bold=True))
+        summary = calibrator.calibrate(list(target), dry_run=dry_run)
+    else:
+        click.echo(click.style('Auto-Detecting Configuration Changes', fg='cyan', bold=True))
+        summary = calibrator.auto_calibrate(dry_run=dry_run)
+
+    if not summary.targets_run:
+        click.echo(click.style('\nNo calibration needed. System is up to date.', fg='green'))
+        return
+
+    click.echo(f"\nTargets: {len(summary.targets_run)}")
+    if summary.triggered_by:
+        click.echo(f"Triggered by: {summary.triggered_by}")
+    click.echo('-' * 60)
+
+    status_colors = {'completed': 'green', 'failed': 'red', 'skipped': 'yellow'}
+    for result in summary.results:
+        status = result.status.value
+        color = status_colors.get(status, 'white')
+        click.echo(f"  {result.target_name:<30} {click.style(status.upper(), fg=color)}")
+
+    click.echo('-' * 60)
+    click.echo(f"Completed: {summary.successful_count}/{len(summary.results)} "
+               f"in {summary.total_duration_seconds:.1f}s")
+
+    if summary.failed_count > 0:
+        click.echo(click.style(f"Failed: {summary.failed_count}", fg='red'))
+
+
 @cli.command()
 def version():
     """Display version information."""
