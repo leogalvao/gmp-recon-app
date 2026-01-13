@@ -4910,7 +4910,16 @@ async def trigger_project_training(
 
         gmp_df = data_loader.gmp.copy()
         budget_df = map_budget_to_gmp(data_loader.budget.copy(), gmp_df, db)
-        direct_costs_df = data_loader.direct_costs.copy()
+        direct_costs_df = map_direct_to_budget(data_loader.direct_costs.copy(), budget_df, db)
+        allocations_df = data_loader.allocations.copy()
+
+        # Apply duplicate exclusions
+        duplicates, _ = detect_duplicates(direct_costs_df)
+        direct_costs_df = apply_duplicate_exclusions(direct_costs_df, duplicates)
+
+        # Apply allocations to get amount_east/amount_west columns
+        budget_df = apply_allocations(budget_df, 'committed_costs_cents', 'base_code', allocations_df, db)
+        direct_costs_df = apply_allocations(direct_costs_df, 'amount_cents', 'base_code', allocations_df, db)
 
         # Step 2: Re-evaluate Budget <-> Schedule links
         schedule_activities = db.query(ScheduleActivity).all()
