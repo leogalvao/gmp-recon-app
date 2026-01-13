@@ -1,0 +1,289 @@
+# ==============================================================================
+# CALIBRATION REGISTRY
+# ==============================================================================
+# Maps configuration sections to their calibration targets.
+# When a config section changes, only the affected components need retraining.
+#
+# This enables lightweight, targeted calibration instead of full system retrain.
+# ==============================================================================
+
+version: "1.0.0"
+
+# ==============================================================================
+# CALIBRATION TARGETS
+# ==============================================================================
+# Defines what can be calibrated and the cost/time of each calibration
+
+targets:
+  fuzzy_matching:
+    description: "Fuzzy matching thresholds and algorithm"
+    calibration_type: "parameter_update"  # No model training needed
+    estimated_time_seconds: 5
+    requires_data: false
+    affects:
+      - "budget_to_gmp_mapping"
+      - "tier2_to_gmp_mapping"
+      - "direct_to_budget_mapping"
+
+  suggestion_engine:
+    description: "Budget suggestion scoring weights"
+    calibration_type: "scoring_recalc"
+    estimated_time_seconds: 30
+    requires_data: true
+    data_sources:
+      - "mapping_feedback"
+      - "budget_match_stats"
+    affects:
+      - "suggestion_confidence_scores"
+      - "auto_suggestion_thresholds"
+
+  gmp_divisions:
+    description: "GMP division definitions and aliases"
+    calibration_type: "lookup_rebuild"
+    estimated_time_seconds: 10
+    requires_data: false
+    affects:
+      - "division_lookup_cache"
+      - "fuzzy_match_corpus"
+
+  allocations:
+    description: "Regional allocation defaults"
+    calibration_type: "parameter_update"
+    estimated_time_seconds: 5
+    requires_data: false
+    affects:
+      - "allocation_defaults"
+      - "validation_rules"
+
+  duplicate_detection:
+    description: "Duplicate detection thresholds"
+    calibration_type: "parameter_update"
+    estimated_time_seconds: 5
+    requires_data: false
+    affects:
+      - "exact_match_rules"
+      - "fuzzy_match_thresholds"
+      - "reversal_detection"
+
+  ml_forecasting:
+    description: "ML model architecture and hyperparameters"
+    calibration_type: "model_retrain"
+    estimated_time_seconds: 300  # 5 minutes
+    requires_data: true
+    data_sources:
+      - "historical_costs"
+      - "buildings"
+    affects:
+      - "lstm_model"
+      - "mlp_model"
+      - "feature_scalers"
+
+  forecasting_methods:
+    description: "EVM, PERT, Parametric method parameters"
+    calibration_type: "parameter_update"
+    estimated_time_seconds: 10
+    requires_data: false
+    affects:
+      - "evm_calculations"
+      - "pert_estimates"
+      - "parametric_factors"
+
+  schedule_parsing:
+    description: "Schedule activity to trade mappings"
+    calibration_type: "mapping_rebuild"
+    estimated_time_seconds: 60
+    requires_data: true
+    data_sources:
+      - "schedule.csv"
+    affects:
+      - "activity_trade_mappings"
+      - "phase_definitions"
+      - "cost_allocations"
+
+  schedule_models:
+    description: "Schedule-driven forecasting models"
+    calibration_type: "model_retrain"
+    estimated_time_seconds: 600  # 10 minutes
+    requires_data: true
+    data_sources:
+      - "schedule.csv"
+      - "breakdown.csv"
+      - "direct_costs.csv"
+    affects:
+      - "trade_models"
+      - "schedule_features"
+      - "variance_tracking"
+
+  cost_type_compatibility:
+    description: "Cost type L/M/S/O compatibility matrix"
+    calibration_type: "matrix_update"
+    estimated_time_seconds: 5
+    requires_data: false
+    affects:
+      - "suggestion_scoring"
+      - "cost_mapping"
+
+  building_features:
+    description: "Building feature definitions and normalization"
+    calibration_type: "feature_engineering"
+    estimated_time_seconds: 120
+    requires_data: true
+    data_sources:
+      - "buildings.csv"
+    affects:
+      - "feature_scalers"
+      - "derived_features"
+      - "complexity_scores"
+
+  training_hyperparams:
+    description: "Model training hyperparameters (epochs, batch size, LR)"
+    calibration_type: "model_retrain"
+    estimated_time_seconds: 300
+    requires_data: true
+    data_sources:
+      - "historical_costs"
+      - "buildings"
+    affects:
+      - "all_models"
+
+
+# ==============================================================================
+# CONFIG SECTION TO TARGET MAPPING
+# ==============================================================================
+# Maps specific config file sections to calibration targets
+
+config_mappings:
+  # gmp_mapping_config.yaml sections
+  gmp_mapping_config:
+    gmp_divisions:
+      targets: ["gmp_divisions", "fuzzy_matching"]
+      priority: 1
+
+    fuzzy_matching:
+      targets: ["fuzzy_matching"]
+      priority: 2
+
+    suggestion_engine.weights:
+      targets: ["suggestion_engine"]
+      priority: 2
+
+    suggestion_engine.confidence_bands:
+      targets: ["suggestion_engine"]
+      priority: 3
+
+    suggestion_engine.cost_type_compatibility:
+      targets: ["cost_type_compatibility", "suggestion_engine"]
+      priority: 2
+
+    allocations:
+      targets: ["allocations"]
+      priority: 3
+
+    duplicate_detection:
+      targets: ["duplicate_detection"]
+      priority: 3
+
+    ml_forecasting:
+      targets: ["ml_forecasting"]
+      priority: 1
+
+    forecasting:
+      targets: ["forecasting_methods"]
+      priority: 2
+
+  # training_config.yaml sections
+  training_config:
+    data:
+      targets: ["ml_forecasting", "schedule_models"]
+      priority: 1
+
+    features.building_params:
+      targets: ["building_features", "ml_forecasting"]
+      priority: 1
+
+    features.derived:
+      targets: ["building_features"]
+      priority: 2
+
+    model.architecture:
+      targets: ["ml_forecasting"]
+      priority: 1
+
+    model.lstm:
+      targets: ["ml_forecasting"]
+      priority: 1
+
+    model.transformer:
+      targets: ["ml_forecasting"]
+      priority: 1
+
+    training:
+      targets: ["training_hyperparams"]
+      priority: 1
+
+    training.augmentation:
+      targets: ["ml_forecasting"]
+      priority: 2
+
+
+# ==============================================================================
+# CALIBRATION DEPENDENCIES
+# ==============================================================================
+# Defines dependencies between targets (if A changes, B must also recalibrate)
+
+dependencies:
+  gmp_divisions:
+    triggers: ["fuzzy_matching", "suggestion_engine"]
+
+  building_features:
+    triggers: ["ml_forecasting"]
+
+  schedule_parsing:
+    triggers: ["schedule_models"]
+
+  cost_type_compatibility:
+    triggers: ["suggestion_engine"]
+
+
+# ==============================================================================
+# CALIBRATION PROFILES
+# ==============================================================================
+# Predefined profiles for common calibration scenarios
+
+profiles:
+  quick:
+    description: "Fast parameter updates only (no model retraining)"
+    include_types:
+      - "parameter_update"
+      - "lookup_rebuild"
+      - "matrix_update"
+    exclude_types:
+      - "model_retrain"
+      - "feature_engineering"
+
+  mapping:
+    description: "All mapping-related calibrations"
+    targets:
+      - "gmp_divisions"
+      - "fuzzy_matching"
+      - "suggestion_engine"
+      - "cost_type_compatibility"
+      - "allocations"
+
+  forecasting:
+    description: "All forecasting calibrations (includes model retrain)"
+    targets:
+      - "ml_forecasting"
+      - "forecasting_methods"
+      - "building_features"
+
+  schedule:
+    description: "Schedule-driven system calibration"
+    targets:
+      - "schedule_parsing"
+      - "schedule_models"
+
+  full:
+    description: "Complete system recalibration"
+    targets: "all"
+    estimated_time_minutes: 20
