@@ -4909,7 +4909,7 @@ async def trigger_project_training(
         settings = get_settings(db)
 
         gmp_df = data_loader.gmp.copy()
-        budget_df = data_loader.budget.copy()
+        budget_df = map_budget_to_gmp(data_loader.budget.copy(), gmp_df, db)
         direct_costs_df = data_loader.direct_costs.copy()
 
         # Step 2: Re-evaluate Budget <-> Schedule links
