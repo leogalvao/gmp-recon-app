@@ -1,4 +1,7 @@
 [core]
-    remote = local
+    remote = s3remote
 ['remote "local"']
     url = /tmp/dvc_remote
+['remote "s3remote"']
+    url = s3://gmp-recon-models/dvc-store
+    region = us-east-1
