@@ -1220,9 +1220,11 @@ def load_budget_csv_safe(path: Optional[Path] = None) -> ETLResult:
         for col in ['Current Budget', 'Committed Costs', 'Direct Cost Tool']:
             cents_col = f'{col.lower().replace(" ", "_")}_cents'
             df[cents_col] = df[col].apply(parse_money_to_cents)
-            # Count rows where original was non-null but parsed to 0
+            # Count rows where original was non-null/non-zero but parsed to 0
+            # Exclude legitimate zero values (0, 0.0, "$0.00", etc.)
             non_null_zero = ((df[col].notna()) & (df[col] != '') &
-                            (df[col] != '-') & (df[cents_col] == 0))
+                            (df[col] != '-') & (df[col] != 0) & (df[col] != 0.0) &
+                            (df[cents_col] == 0))
             parse_errors += non_null_zero.sum()
 
         if parse_errors > 0:
