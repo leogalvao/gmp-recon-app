@@ -24,7 +24,7 @@ from app.domain.services import (
     ForecastInferenceService,
     LeakagePreventionService,
 )
-from app.infrastructure.feature_flags import FeatureFlags, FeatureFlag
+from app.infrastructure.feature_flags import FeatureFlags, FeatureFlag, init_feature_flags
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,10 @@ logger = logging.getLogger(__name__)
 @click.group()
 def cutover():
     """Cutover management commands."""
-    pass
+    # Initialize feature flags with database persistence
+    init_feature_flags()
+    # Sync flags from database
+    FeatureFlags.sync_from_db()
 
 
 @cutover.command()
