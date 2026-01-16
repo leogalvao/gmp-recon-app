@@ -145,7 +145,7 @@ class ForecastInferenceService:
         model_record = self.db.query(MLModelRegistry).get(
             model_id or self._get_active_model_id()
         )
-        model_version = model_record.version if model_record else "unknown"
+        model_version = model_record.model_version if model_record else "unknown"
 
         return ProjectForecastResult(
             project_id=project_id,
