@@ -438,7 +438,7 @@ class ScheduleDrivenTrainer:
         # Save models
         for trade_name, model in self.models.items():
             safe_name = trade_name.replace(' ', '_').replace('&', 'and')
-            model_path = path / f"{safe_name}_model.keras"
+            model_path = path / f"{safe_name}_model.weights.h5"
             model.save_weights(str(model_path))
 
         # Save scalers and config
@@ -466,7 +466,7 @@ class ScheduleDrivenTrainer:
         # Load models
         for trade_name in config['trades']:
             safe_name = trade_name.replace(' ', '_').replace('&', 'and')
-            model_path = path / f"{safe_name}_model.keras"
+            model_path = path / f"{safe_name}_model.weights.h5"
 
             if model_path.exists():
                 model = create_schedule_driven_model(
