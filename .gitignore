@@ -42,5 +42,11 @@ data/*.csv
 .venv311/
 =2.15.0
 best_lstm_model.keras
-models/
+
+# Models - tracked by DVC (model files ignored, .dvc files tracked)
+/models/**
+!/models/
+!/models/**/.gitkeep
+!/models/*.dvc
+
 data/*.xlsx

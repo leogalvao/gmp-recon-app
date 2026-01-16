@@ -1,0 +1,6 @@
+outs:
+- md5: 110a10d5e10c0d3c46c31da12d23e82d.dir
+  size: 2473198
+  nfiles: 3
+  hash: md5
+  path: schedule_driven
