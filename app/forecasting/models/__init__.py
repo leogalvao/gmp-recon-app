@@ -10,6 +10,7 @@ from .base_model import BaseForecaster, BuildingFeatures, ForecastResult
 # Lazy imports for TensorFlow-dependent classes
 _LSTMForecaster = None
 _TransformerForecaster = None
+_MultiProjectForecaster = None
 
 
 def get_lstm_forecaster():
@@ -30,7 +31,16 @@ def get_transformer_forecaster():
     return _TransformerForecaster
 
 
+def get_multi_project_forecaster():
+    """Get MultiProjectForecaster class (lazy import to avoid TensorFlow dependency)."""
+    global _MultiProjectForecaster
+    if _MultiProjectForecaster is None:
+        from .multi_project_forecaster import MultiProjectForecaster
+        _MultiProjectForecaster = MultiProjectForecaster
+    return _MultiProjectForecaster
+
+
 __all__ = [
     'BaseForecaster', 'BuildingFeatures', 'ForecastResult',
-    'get_lstm_forecaster', 'get_transformer_forecaster',
+    'get_lstm_forecaster', 'get_transformer_forecaster', 'get_multi_project_forecaster',
 ]
