@@ -13,13 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.models import get_db
+from app.models import get_db, User
 from app.domain.services import (
     CostAggregationService,
     ScheduleLinkageService,
     BudgetValidationService,
 )
 from app.domain.exceptions import GMPNotFoundError
+from app.api.v1.auth import get_current_active_user
 
 router = APIRouter()
 
@@ -141,7 +142,8 @@ class ValidationSummaryResponse(BaseModel):
 )
 def get_full_reconciliation(
     gmp_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get complete reconciliation for a GMP."""
     aggregation_service = CostAggregationService(db)
@@ -164,7 +166,8 @@ def get_full_reconciliation(
 def get_evm_metrics(
     gmp_division: str,
     as_of_date: Optional[date] = Query(None, description="Reference date (default: today)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get earned value management metrics."""
     schedule_service = ScheduleLinkageService(db)
@@ -181,7 +184,8 @@ def get_weekly_totals(
     gmp_id: int,
     start_date: date,
     end_date: date,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get weekly cost totals for a GMP."""
     aggregation_service = CostAggregationService(db)
@@ -201,7 +205,8 @@ def get_monthly_totals(
     gmp_id: int,
     start_date: date,
     end_date: date,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get monthly cost totals for a GMP."""
     aggregation_service = CostAggregationService(db)
@@ -220,7 +225,8 @@ def get_period_breakdown(
     end_date: date,
     granularity: str = Query("month", pattern="^(week|month)$"),
     as_of_date: Optional[date] = Query(None, description="Reference date for split"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get period breakdown with actual/forecast split."""
     aggregation_service = CostAggregationService(db)
@@ -241,7 +247,8 @@ def get_period_breakdown(
 def get_cumulative_cost(
     gmp_id: int,
     as_of_date: date,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get cumulative cost as of a date."""
     aggregation_service = CostAggregationService(db)
@@ -263,7 +270,8 @@ def get_cumulative_cost(
 )
 def validate_reconciliation(
     gmp_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Validate reconciliation integrity."""
     aggregation_service = CostAggregationService(db)
@@ -283,7 +291,8 @@ def validate_reconciliation(
 )
 def get_validation_summary(
     gmp_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get validation summary for a GMP."""
     validation_service = BudgetValidationService(db)
@@ -303,7 +312,8 @@ def get_validation_summary(
     description="Get total and count of unmapped direct costs"
 )
 def get_unmapped_summary(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get summary of unmapped costs."""
     aggregation_service = CostAggregationService(db)
@@ -330,7 +340,8 @@ def get_schedule_forecast(
     start_date: date,
     end_date: date,
     granularity: str = Query("month", pattern="^(week|month)$"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get schedule-based cost forecast."""
     schedule_service = ScheduleLinkageService(db)
@@ -350,7 +361,8 @@ def get_schedule_forecast(
 )
 def recalculate_forecasts(
     project_id: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Recalculate all forecasts."""
     schedule_service = ScheduleLinkageService(db)
@@ -366,7 +378,8 @@ def prorate_week(
     week_start: date,
     week_end: date,
     amount_cents: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Calculate week proration across months."""
     aggregation_service = CostAggregationService(db)

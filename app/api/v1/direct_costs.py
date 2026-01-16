@@ -14,13 +14,14 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.models import get_db
+from app.models import get_db, User
 from app.infrastructure.repositories import DirectCostRepository, BudgetRepository
 from app.domain.services import CostAggregationService
 from app.domain.exceptions import (
     DirectCostNotFoundError,
     BudgetNotFoundError,
 )
+from app.api.v1.auth import get_current_active_user
 
 router = APIRouter()
 
@@ -117,7 +118,8 @@ class PeriodCostsResponse(BaseModel):
 )
 def create_direct_cost(
     cost_data: DirectCostCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Create a new direct cost entity."""
     repo = DirectCostRepository(db)
@@ -159,7 +161,8 @@ def create_direct_cost(
 )
 def get_direct_cost(
     cost_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get a direct cost entity."""
     repo = DirectCostRepository(db)
@@ -187,7 +190,8 @@ def list_direct_costs(
     end_date: Optional[date] = Query(None, description="Filter by end date"),
     limit: int = Query(100, le=1000, description="Max results"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """List direct costs with optional filters."""
     repo = DirectCostRepository(db)
@@ -220,7 +224,8 @@ def list_direct_costs(
 def update_direct_cost(
     cost_id: int,
     cost_data: DirectCostUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Update a direct cost entity."""
     repo = DirectCostRepository(db)
@@ -279,7 +284,8 @@ def update_direct_cost(
 )
 def delete_direct_cost(
     cost_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Delete a direct cost entity."""
     repo = DirectCostRepository(db)
@@ -314,7 +320,8 @@ def delete_direct_cost(
 )
 def bulk_map_costs(
     request: BulkMappingRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Bulk map direct costs to budgets."""
     repo = DirectCostRepository(db)
@@ -350,7 +357,8 @@ def get_period_costs(
     start_date: date,
     end_date: date,
     granularity: str = Query("month", pattern="^(week|month)$"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get costs aggregated by period for a budget."""
     aggregation_service = CostAggregationService(db)
@@ -371,7 +379,8 @@ def get_period_costs(
 )
 def get_cost_stats(
     budget_id: Optional[int] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get summary statistics for direct costs."""
     repo = DirectCostRepository(db)

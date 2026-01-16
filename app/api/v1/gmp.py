@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.models import get_db
+from app.models import get_db, User
 from app.infrastructure.repositories import GMPRepository
 from app.domain.services import BudgetValidationService
 from app.domain.exceptions import (
@@ -20,6 +20,7 @@ from app.domain.exceptions import (
     DuplicateGMPError,
     ImmutableFieldError,
 )
+from app.api.v1.auth import get_current_active_user
 
 router = APIRouter()
 
@@ -95,7 +96,8 @@ class GMPListResponse(BaseModel):
 )
 def create_gmp(
     gmp_data: GMPCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Create a new GMP entity.
@@ -137,7 +139,8 @@ def create_gmp(
 )
 def get_gmp(
     gmp_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get a GMP entity with computed fields."""
     repo = GMPRepository(db)
@@ -160,7 +163,8 @@ def get_gmp(
 def list_gmps_for_project(
     project_id: int,
     include_totals: bool = True,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """List all GMPs for a project."""
     repo = GMPRepository(db)
@@ -197,7 +201,8 @@ def list_gmps_for_project(
 def update_gmp_description(
     gmp_id: int,
     gmp_data: GMPUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Update a GMP's description.
@@ -226,7 +231,8 @@ def update_gmp_description(
 )
 def get_gmp_validation(
     gmp_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get validation summary for a GMP and its budgets."""
     validation_service = BudgetValidationService(db)

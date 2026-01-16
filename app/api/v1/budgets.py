@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.models import get_db
+from app.models import get_db, User
 from app.infrastructure.repositories import BudgetRepository, GMPRepository
 from app.domain.services import BudgetValidationService, CostAggregationService
 from app.domain.exceptions import (
@@ -22,6 +22,7 @@ from app.domain.exceptions import (
     BudgetUnderflowError,
     BudgetHasMappedCostsError,
 )
+from app.api.v1.auth import get_current_active_user
 
 router = APIRouter()
 
@@ -103,7 +104,8 @@ class BudgetTransferResponse(BaseModel):
 def create_budget(
     gmp_id: int,
     budget_data: BudgetCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Create a new budget entity under a GMP.
@@ -161,7 +163,8 @@ def create_budget(
 )
 def get_budget(
     budget_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get a budget entity with computed fields."""
     repo = BudgetRepository(db)
@@ -183,7 +186,8 @@ def get_budget(
 )
 def list_budgets_for_gmp(
     gmp_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """List all budgets for a GMP."""
     repo = BudgetRepository(db)
@@ -218,7 +222,8 @@ def list_budgets_for_gmp(
 def update_budget(
     budget_id: int,
     budget_data: BudgetUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Update a budget entity.
@@ -274,7 +279,8 @@ def update_budget(
 )
 def delete_budget(
     budget_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Delete a budget entity.
@@ -317,7 +323,8 @@ def delete_budget(
 )
 def transfer_budget(
     transfer_data: BudgetTransferRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Transfer budget between two budget lines.
@@ -366,7 +373,8 @@ def transfer_budget(
     description="Get all budgets that haven't been assigned to a zone"
 )
 def get_unmapped_budgets(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get budgets without zone assignment."""
     repo = BudgetRepository(db)
@@ -382,7 +390,8 @@ def get_unmapped_budgets(
 def bulk_update_zone(
     budget_ids: List[int],
     zone: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Bulk update zone for multiple budgets."""
     if zone not in ('EAST', 'WEST', 'SHARED'):
