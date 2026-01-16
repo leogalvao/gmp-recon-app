@@ -4,18 +4,17 @@ Feature Flags - Gradual rollout system for new features.
 Provides:
 1. Per-project feature flag management
 2. Percentage-based rollout
-3. Override capabilities for testing
-4. Audit logging of flag changes
+3. Database persistence for flag states
+4. Override capabilities for testing
+5. Audit logging of flag changes
 """
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Callable
 
 from sqlalchemy.orm import Session
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, Enum as SQLEnum
-from sqlalchemy.ext.declarative import declarative_base
 
 logger = logging.getLogger(__name__)
 
@@ -36,22 +35,183 @@ class FeatureFlagConfig:
     description: str
     strategy: RolloutStrategy = RolloutStrategy.DISABLED
     percentage: float = 0.0  # For percentage rollout (0-100)
-    allowlist: Set[int] = None  # Entity IDs where flag is enabled
-    denylist: Set[int] = None   # Entity IDs where flag is disabled
-    metadata: Dict[str, Any] = None
+    allowlist: Set[int] = field(default_factory=set)  # Entity IDs where flag is enabled
+    denylist: Set[int] = field(default_factory=set)   # Entity IDs where flag is disabled
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
-        if self.allowlist is None:
-            self.allowlist = set()
-        if self.denylist is None:
-            self.denylist = set()
-        if self.metadata is None:
-            self.metadata = {}
+
+class FeatureFlagStore:
+    """
+    Database-backed storage for feature flags.
+    Provides persistence across process restarts.
+    """
+
+    _db_getter: Optional[Callable[[], Session]] = None
+
+    @classmethod
+    def set_db_getter(cls, db_getter: Callable[[], Session]):
+        """Set the database session getter function."""
+        cls._db_getter = db_getter
+
+    @classmethod
+    def _get_db(cls) -> Optional[Session]:
+        """Get a database session."""
+        if cls._db_getter:
+            return cls._db_getter()
+        return None
+
+    @classmethod
+    def load_flag_state(cls, flag_name: str) -> Optional[Dict[str, Any]]:
+        """Load flag state from database."""
+        db = cls._get_db()
+        if not db:
+            return None
+
+        try:
+            from app.models import FeatureFlagState, FeatureFlagEntity
+
+            # Get flag state
+            state = db.query(FeatureFlagState).filter(
+                FeatureFlagState.flag_name == flag_name
+            ).first()
+
+            if not state:
+                return None
+
+            # Get entity entries (allowlist/denylist)
+            entities = db.query(FeatureFlagEntity).filter(
+                FeatureFlagEntity.flag_name == flag_name
+            ).all()
+
+            allowlist = {e.entity_id for e in entities if e.is_enabled}
+            denylist = {e.entity_id for e in entities if not e.is_enabled}
+
+            return {
+                'strategy': state.strategy,
+                'percentage': state.percentage,
+                'allowlist': allowlist,
+                'denylist': denylist,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to load flag state from DB: {e}")
+            return None
+        finally:
+            db.close()
+
+    @classmethod
+    def save_flag_state(
+        cls,
+        flag_name: str,
+        strategy: str,
+        percentage: float = 0.0,
+        allowlist: Optional[Set[int]] = None,
+        denylist: Optional[Set[int]] = None,
+    ):
+        """Save flag state to database."""
+        db = cls._get_db()
+        if not db:
+            return
+
+        try:
+            from app.models import FeatureFlagState, FeatureFlagEntity
+
+            # Upsert flag state
+            state = db.query(FeatureFlagState).filter(
+                FeatureFlagState.flag_name == flag_name
+            ).first()
+
+            if state:
+                state.strategy = strategy
+                state.percentage = percentage
+                state.updated_at = datetime.utcnow()
+            else:
+                state = FeatureFlagState(
+                    flag_name=flag_name,
+                    strategy=strategy,
+                    percentage=percentage,
+                )
+                db.add(state)
+
+            # Update entity entries
+            if allowlist is not None:
+                for entity_id in allowlist:
+                    existing = db.query(FeatureFlagEntity).filter(
+                        FeatureFlagEntity.flag_name == flag_name,
+                        FeatureFlagEntity.entity_id == entity_id,
+                    ).first()
+
+                    if existing:
+                        existing.is_enabled = True
+                    else:
+                        db.add(FeatureFlagEntity(
+                            flag_name=flag_name,
+                            entity_id=entity_id,
+                            is_enabled=True,
+                        ))
+
+            if denylist is not None:
+                for entity_id in denylist:
+                    existing = db.query(FeatureFlagEntity).filter(
+                        FeatureFlagEntity.flag_name == flag_name,
+                        FeatureFlagEntity.entity_id == entity_id,
+                    ).first()
+
+                    if existing:
+                        existing.is_enabled = False
+                    else:
+                        db.add(FeatureFlagEntity(
+                            flag_name=flag_name,
+                            entity_id=entity_id,
+                            is_enabled=False,
+                        ))
+
+            db.commit()
+            logger.debug(f"Saved flag state for '{flag_name}' to database")
+        except Exception as e:
+            logger.warning(f"Failed to save flag state to DB: {e}")
+            db.rollback()
+        finally:
+            db.close()
+
+    @classmethod
+    def add_entity(cls, flag_name: str, entity_id: int, is_enabled: bool):
+        """Add or update a single entity entry."""
+        db = cls._get_db()
+        if not db:
+            return
+
+        try:
+            from app.models import FeatureFlagEntity
+
+            existing = db.query(FeatureFlagEntity).filter(
+                FeatureFlagEntity.flag_name == flag_name,
+                FeatureFlagEntity.entity_id == entity_id,
+            ).first()
+
+            if existing:
+                existing.is_enabled = is_enabled
+            else:
+                db.add(FeatureFlagEntity(
+                    flag_name=flag_name,
+                    entity_id=entity_id,
+                    is_enabled=is_enabled,
+                ))
+
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to add entity to DB: {e}")
+            db.rollback()
+        finally:
+            db.close()
 
 
 class FeatureFlag:
     """
     Feature flag for gradual rollout of new functionality.
+
+    Supports both in-memory and database-backed persistence.
+    Database persistence is used when available, with in-memory
+    fallback for testing or when DB is not configured.
 
     Example usage:
         multi_project_flag = FeatureFlag('multi_project_forecasting')
@@ -64,7 +224,7 @@ class FeatureFlag:
             return get_forecasts_legacy(project_id)
     """
 
-    # In-memory flag registry (for simplicity; could use Redis/DB in production)
+    # In-memory flag registry (cache + fallback when DB not available)
     _registry: Dict[str, FeatureFlagConfig] = {}
 
     def __init__(self, name: str, config: Optional[FeatureFlagConfig] = None):
@@ -72,21 +232,66 @@ class FeatureFlag:
         self._default_config = config
 
         if name not in self._registry:
-            # Create default config if not exists
-            self._registry[name] = config or FeatureFlagConfig(
-                name=name,
-                description=f"Feature flag: {name}",
-            )
+            # Try to load from database first
+            db_state = FeatureFlagStore.load_flag_state(name)
+
+            if db_state:
+                # Use database state
+                self._registry[name] = FeatureFlagConfig(
+                    name=name,
+                    description=config.description if config else f"Feature flag: {name}",
+                    strategy=RolloutStrategy(db_state['strategy']),
+                    percentage=db_state['percentage'],
+                    allowlist=db_state['allowlist'],
+                    denylist=db_state['denylist'],
+                )
+            else:
+                # Use provided config or default
+                self._registry[name] = config or FeatureFlagConfig(
+                    name=name,
+                    description=f"Feature flag: {name}",
+                )
 
     @property
     def config(self) -> FeatureFlagConfig:
         # Re-create config if registry was cleared (e.g., by reset())
         if self.name not in self._registry:
-            self._registry[self.name] = self._default_config or FeatureFlagConfig(
-                name=self.name,
-                description=f"Feature flag: {self.name}",
-            )
+            # Try DB first
+            db_state = FeatureFlagStore.load_flag_state(self.name)
+            if db_state:
+                self._registry[self.name] = FeatureFlagConfig(
+                    name=self.name,
+                    description=self._default_config.description if self._default_config else f"Feature flag: {self.name}",
+                    strategy=RolloutStrategy(db_state['strategy']),
+                    percentage=db_state['percentage'],
+                    allowlist=db_state['allowlist'],
+                    denylist=db_state['denylist'],
+                )
+            else:
+                self._registry[self.name] = self._default_config or FeatureFlagConfig(
+                    name=self.name,
+                    description=f"Feature flag: {self.name}",
+                )
         return self._registry[self.name]
+
+    def _sync_from_db(self):
+        """Refresh config from database."""
+        db_state = FeatureFlagStore.load_flag_state(self.name)
+        if db_state:
+            self.config.strategy = RolloutStrategy(db_state['strategy'])
+            self.config.percentage = db_state['percentage']
+            self.config.allowlist = db_state['allowlist']
+            self.config.denylist = db_state['denylist']
+
+    def _persist(self):
+        """Persist current config to database."""
+        FeatureFlagStore.save_flag_state(
+            flag_name=self.name,
+            strategy=self.config.strategy.value,
+            percentage=self.config.percentage,
+            allowlist=self.config.allowlist,
+            denylist=self.config.denylist,
+        )
 
     def is_enabled(self, entity_id: Optional[int] = None) -> bool:
         """
@@ -132,11 +337,16 @@ class FeatureFlag:
         """
         if entity_id is not None:
             self.config.allowlist.add(entity_id)
+            self.config.denylist.discard(entity_id)  # Remove from denylist if present
             if self.config.strategy == RolloutStrategy.DISABLED:
                 self.config.strategy = RolloutStrategy.ALLOWLIST
+            # Persist entity change and strategy
+            FeatureFlagStore.add_entity(self.name, entity_id, is_enabled=True)
+            self._persist()  # Also persist strategy change
             logger.info(f"Feature '{self.name}' enabled for entity {entity_id}")
         else:
             self.config.strategy = RolloutStrategy.ENABLED
+            self._persist()
             logger.info(f"Feature '{self.name}' enabled globally")
 
     def disable(self, entity_id: Optional[int] = None):
@@ -149,9 +359,13 @@ class FeatureFlag:
         if entity_id is not None:
             self.config.allowlist.discard(entity_id)
             self.config.denylist.add(entity_id)
+            # Persist entity change
+            FeatureFlagStore.add_entity(self.name, entity_id, is_enabled=False)
+            self._persist()  # Persist denylist change
             logger.info(f"Feature '{self.name}' disabled for entity {entity_id}")
         else:
             self.config.strategy = RolloutStrategy.DISABLED
+            self._persist()
             logger.info(f"Feature '{self.name}' disabled globally")
 
     def set_percentage(self, percentage: float):
@@ -166,6 +380,7 @@ class FeatureFlag:
 
         self.config.strategy = RolloutStrategy.PERCENTAGE
         self.config.percentage = percentage
+        self._persist()
         logger.info(f"Feature '{self.name}' set to {percentage}% rollout")
 
     def get_status(self) -> Dict[str, Any]:
@@ -189,7 +404,7 @@ class FeatureFlag:
 
     @classmethod
     def reset(cls, name: Optional[str] = None):
-        """Reset feature flags (for testing)."""
+        """Reset feature flags (for testing - clears in-memory cache only)."""
         if name:
             if name in cls._registry:
                 del cls._registry[name]
@@ -271,6 +486,15 @@ class FeatureFlags:
         logger.info("All multi-project features enabled globally")
 
     @classmethod
+    def disable_globally(cls):
+        """Disable all multi-project features globally."""
+        cls.MULTI_PROJECT_FORECASTING.disable()
+        cls.CANONICAL_TRADE_MAPPING.disable()
+        cls.FEATURE_STORE.disable()
+        cls.PROBABILISTIC_FORECASTS.disable()
+        logger.info("All multi-project features disabled globally")
+
+    @classmethod
     def set_rollout_percentage(cls, percentage: float):
         """Set percentage-based rollout for all features."""
         cls.MULTI_PROJECT_FORECASTING.set_percentage(percentage)
@@ -279,7 +503,27 @@ class FeatureFlags:
         cls.PROBABILISTIC_FORECASTS.set_percentage(percentage)
         logger.info(f"All multi-project features set to {percentage}% rollout")
 
+    @classmethod
+    def sync_from_db(cls):
+        """Reload all flags from database."""
+        cls.MULTI_PROJECT_FORECASTING._sync_from_db()
+        cls.CANONICAL_TRADE_MAPPING._sync_from_db()
+        cls.FEATURE_STORE._sync_from_db()
+        cls.PROBABILISTIC_FORECASTS._sync_from_db()
+        logger.info("Feature flags synced from database")
+
 
 def get_feature_flag(name: str) -> FeatureFlag:
     """Get a feature flag by name."""
     return FeatureFlag(name)
+
+
+def init_feature_flags():
+    """Initialize feature flag system with database connection."""
+    from app.models import get_db, SessionLocal
+
+    def db_getter():
+        return SessionLocal()
+
+    FeatureFlagStore.set_db_getter(db_getter)
+    logger.info("Feature flag database persistence initialized")

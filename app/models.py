@@ -1015,6 +1015,43 @@ class ProjectForecast(Base):
     )
 
 
+class FeatureFlagState(Base):
+    """
+    Persistent storage for feature flag states.
+    Supports per-entity (project) flag settings.
+    """
+    __tablename__ = 'feature_flag_states'
+
+    id = Column(Integer, primary_key=True, index=True)
+    flag_name = Column(String(100), nullable=False, index=True)
+    strategy = Column(String(50), nullable=False, default='disabled')  # disabled, enabled, percentage, allowlist, denylist
+    percentage = Column(Float, default=0.0)  # For percentage rollout
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('flag_name', name='uq_flag_name'),
+    )
+
+
+class FeatureFlagEntity(Base):
+    """
+    Per-entity (project) feature flag settings.
+    Tracks which entities have flags enabled/disabled.
+    """
+    __tablename__ = 'feature_flag_entities'
+
+    id = Column(Integer, primary_key=True, index=True)
+    flag_name = Column(String(100), nullable=False, index=True)
+    entity_id = Column(Integer, nullable=False, index=True)  # project_id
+    is_enabled = Column(Boolean, nullable=False, default=True)  # True = allowlist, False = denylist
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('flag_name', 'entity_id', name='uq_flag_entity'),
+    )
+
+
 def init_db():
     """Initialize the database and create all tables."""
     Base.metadata.create_all(bind=engine)
