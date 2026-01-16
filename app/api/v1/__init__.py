@@ -9,6 +9,7 @@ Implements the API contracts from the specification:
 - Schedule endpoints (read, progress updates)
 - Migration endpoints (Phase 2 multi-project)
 - ML Pipeline endpoints (Phase 3 forecasting)
+- Cutover endpoints (Phase 4 integration)
 """
 from fastapi import APIRouter
 
@@ -19,6 +20,7 @@ from .direct_costs import router as direct_costs_router
 from .reconciliation import router as reconciliation_router
 from .migration import router as migration_router
 from .ml_pipeline import router as ml_router
+from .cutover import router as cutover_router
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -29,3 +31,4 @@ api_router.include_router(direct_costs_router, prefix="/direct-costs", tags=["Di
 api_router.include_router(reconciliation_router, prefix="/reconciliation", tags=["Reconciliation"])
 api_router.include_router(migration_router, prefix="/migration", tags=["Migration"])
 api_router.include_router(ml_router, prefix="/ml", tags=["ML Pipeline"])
+api_router.include_router(cutover_router, prefix="/cutover", tags=["Cutover"])

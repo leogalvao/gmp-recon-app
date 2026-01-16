@@ -14,6 +14,9 @@ from .training_dataset_service import TrainingDatasetService, TrainingDatasetCon
 from .model_training_service import ModelTrainingService, TrainingConfig, TrainingResult
 from .model_evaluation_service import ModelEvaluationService, EvaluationMetrics, BacktestResult
 from .forecast_inference_service import ForecastInferenceService, ProjectForecastResult, TradeForecast
+# Phase 4 - Integration services
+from .leakage_prevention import LeakagePreventionService, TemporalLeakageValidator, CrossProjectLeakageValidator
+from .compatibility_layer import CompatibilityLayer, ProjectCutoverService, CutoverResult
 
 __all__ = [
     'CostMapper',
@@ -42,4 +45,11 @@ __all__ = [
     'ForecastInferenceService',
     'ProjectForecastResult',
     'TradeForecast',
+    # Phase 4 - Integration services
+    'LeakagePreventionService',
+    'TemporalLeakageValidator',
+    'CrossProjectLeakageValidator',
+    'CompatibilityLayer',
+    'ProjectCutoverService',
+    'CutoverResult',
 ]
