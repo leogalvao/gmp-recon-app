@@ -502,14 +502,14 @@ class GMP(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Multi-project platform fields (Phase 1)
-    canonical_trade_id = Column(Integer, nullable=True)  # FK to canonical_trades
+    canonical_trade_id = Column(Integer, ForeignKey('canonical_trades.id'), nullable=True)
     normalized_amount_per_sf_cents = Column(Integer, nullable=True)  # For cross-project comparison
 
     # Relationships
     project = relationship("Project", back_populates="gmps")
     budgets = relationship("BudgetEntity", back_populates="gmp", cascade="all, delete-orphan")
     change_orders = relationship("ChangeOrder", back_populates="gmp", cascade="all, delete-orphan")
-    canonical_trade = relationship("CanonicalTrade", back_populates="gmp_entities")
+    canonical_trade = relationship("CanonicalTrade", back_populates="gmp_entities", foreign_keys=[canonical_trade_id])
 
     __table_args__ = (
         UniqueConstraint('project_id', 'division', 'zone', name='uq_project_division_zone'),

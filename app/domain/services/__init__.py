@@ -6,6 +6,9 @@ from .cost_mapper import CostMapper, MappingRule
 from .cost_aggregation_service import CostAggregationService
 from .budget_validation_service import BudgetValidationService
 from .schedule_linkage_service import ScheduleLinkageService
+from .trade_mapping_service import TradeMappingService, TradeMappingResult, TradeMappingSuggestion
+from .project_migration_service import ProjectMigrationService, ProjectMigrationResult
+from .feature_store_service import FeatureStoreService, FeatureBackfillResult
 
 __all__ = [
     'CostMapper',
@@ -13,4 +16,12 @@ __all__ = [
     'CostAggregationService',
     'BudgetValidationService',
     'ScheduleLinkageService',
+    # Phase 2 - Multi-project services
+    'TradeMappingService',
+    'TradeMappingResult',
+    'TradeMappingSuggestion',
+    'ProjectMigrationService',
+    'ProjectMigrationResult',
+    'FeatureStoreService',
+    'FeatureBackfillResult',
 ]
