@@ -107,7 +107,8 @@ def status(project_id: int):
     click.echo(f"\nProject: {status['project_code']} (ID: {status['project_id']})")
     click.echo(f"Multi-project enabled: {status['is_multi_project_enabled']}")
     click.echo(f"Ready for cutover: {status['is_ready_for_cutover']}")
-    click.echo(f"Data quality score: {status['data_quality_score']:.2f if status['data_quality_score'] else 'N/A'}")
+    quality = status['data_quality_score']
+    click.echo(f"Data quality score: {quality:.2f}" if quality else "Data quality score: N/A")
 
     if status['blocking_issues']:
         click.echo("\nBlocking issues:")
