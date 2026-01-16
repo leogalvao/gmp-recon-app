@@ -285,15 +285,54 @@ class ScheduleDrivenTrainer:
             if col not in df.columns:
                 df[col] = 0
 
-        # Normalize features
+        # ═══════════════════════════════════════════════════════════════════
+        # Improved Normalization Strategy
+        # - Log-transform monetary columns to handle large value ranges
+        # - Robust z-score normalization with clipping
+        # ═══════════════════════════════════════════════════════════════════
+
+        # Columns requiring log-transform (monetary values with large ranges)
+        log_transform_cols = {
+            'monthly_cost', 'cumulative_cost', 'trade_gmp_budget',
+            'trade_budget_remaining', 'trade_schedule_variance'
+        }
+
         scaler_stats = {}
         for col in schedule_cols + trade_cols + cost_cols:
-            if col in df.columns:
-                mean = df[col].mean()
-                std = df[col].std()
-                if std > 0:
-                    df[col] = (df[col] - mean) / std
-                scaler_stats[col] = {'mean': mean, 'std': std if std > 0 else 1}
+            if col not in df.columns:
+                continue
+
+            values = df[col].astype(float).copy()  # Ensure float type
+
+            # Apply log1p transform for monetary columns (handles zeros)
+            if col in log_transform_cols:
+                # Handle negative values (e.g., negative variance)
+                sign = np.sign(values)
+                values = sign * np.log1p(np.abs(values))
+                scaler_stats[col] = {'transform': 'log1p'}
+            else:
+                scaler_stats[col] = {'transform': 'none'}
+
+            # Robust z-score: use median and IQR for outlier resistance
+            median = values.median()
+            q75, q25 = values.quantile(0.75), values.quantile(0.25)
+            iqr = q75 - q25
+
+            if iqr > 1e-6:
+                # Scale by IQR (more robust than std)
+                values = (values - median) / iqr
+            elif values.std() > 1e-6:
+                # Fall back to standard z-score
+                values = (values - values.mean()) / values.std()
+
+            # Clip extreme values to [-5, 5] range
+            values = values.clip(-5, 5)
+
+            df[col] = values
+            scaler_stats[col].update({
+                'median': float(median),
+                'iqr': float(iqr) if iqr > 1e-6 else 1.0
+            })
 
         self.scalers[trade_name] = scaler_stats
 
@@ -463,15 +502,25 @@ class ScheduleDrivenTrainer:
 
         last_row = df.iloc[-1]
 
-        # Denormalize prediction if needed
+        # Denormalize prediction using scaler stats
         scaler = self.scalers.get(trade_name, {})
         mean_val = float(mean.numpy()[0, 0])
         std_val = float(std.numpy()[0, 0])
 
         if 'monthly_cost' in scaler:
             stats = scaler['monthly_cost']
-            mean_val = mean_val * stats['std'] + stats['mean']
-            std_val = std_val * stats['std']
+            # Reverse robust z-score normalization
+            iqr = stats.get('iqr', 1.0)
+            median = stats.get('median', 0.0)
+            mean_val = mean_val * iqr + median
+            std_val = std_val * iqr
+
+            # Reverse log1p transform if applied
+            if stats.get('transform') == 'log1p':
+                # For log1p: x = sign(y) * (exp(|y|) - 1)
+                sign = 1 if mean_val >= 0 else -1
+                mean_val = sign * (np.expm1(abs(mean_val)))
+                std_val = abs(np.expm1(abs(std_val)))
 
         # Calculate forecast at completion
         budget = last_row.get('trade_gmp_budget', 0)
