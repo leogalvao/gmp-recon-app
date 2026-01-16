@@ -53,6 +53,19 @@ class EACMode(enum.Enum):
     COMMITMENTS = "commitments"
 
 
+class User(Base):
+    """Application user for authentication."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    name = Column(String(100), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class BudgetToGMP(Base):
     """Mapping from Budget rows to GMP divisions."""
     __tablename__ = "budget_to_gmp"
