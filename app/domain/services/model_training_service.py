@@ -183,11 +183,13 @@ class ModelTrainingService:
 
             epochs_trained = len(history['loss'])
             final_train_loss = history['loss'][-1]
-            final_val_loss = history.get('val_loss', [None])[-1]
+            val_loss_history = history.get('val_loss', [])
+            final_val_loss = val_loss_history[-1] if val_loss_history else None
 
+            val_loss_str = f"{final_val_loss:.4f}" if final_val_loss is not None else "N/A"
             logger.info(
                 f"Training complete: {epochs_trained} epochs, "
-                f"train_loss={final_train_loss:.4f}, val_loss={final_val_loss:.4f if final_val_loss else 'N/A'}"
+                f"train_loss={final_train_loss:.4f}, val_loss={val_loss_str}"
             )
 
         except Exception as e:
@@ -226,29 +228,30 @@ class ModelTrainingService:
 
         # Register model in database
         model_record = MLModelRegistry(
-            name=model_name,
-            version=version,
-            model_type='multi_project_forecaster',
+            model_name=model_name,
+            model_version=version,
+            model_type='global',
             created_at=datetime.now(),
             training_dataset_id=None,  # Could link to saved dataset record
-            metrics_json=json.dumps({
+            metrics=json.dumps({
                 'final_train_loss': final_train_loss,
                 'final_val_loss': final_val_loss,
                 'epochs_trained': epochs_trained,
                 'num_projects': num_projects,
                 'num_trades': num_trades,
             }),
-            model_path=str(model_dir),
-            is_active=True,
+            artifact_path=str(model_dir),
+            is_production=False,
         )
         self.db.add(model_record)
         self.db.flush()
 
-        # Deactivate previous versions
+        # Deactivate previous versions (remove production status)
         self.db.query(MLModelRegistry).filter(
-            MLModelRegistry.name == model_name,
+            MLModelRegistry.model_name == model_name,
             MLModelRegistry.id != model_record.id,
-        ).update({'is_active': False})
+            MLModelRegistry.is_production == True,
+        ).update({'is_production': False})
 
         self.db.commit()
 

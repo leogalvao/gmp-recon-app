@@ -203,14 +203,18 @@ class GaussianOutputHead(layers.Layer):
         super().__init__(**kwargs)
         self.output_layer = layers.Dense(2, name='gaussian_params')  # [mean, log_std]
 
-    def call(self, inputs):
+    def call(self, inputs, return_raw=False):
         """
         Args:
             inputs: Tensor of shape (batch_size, features)
+            return_raw: If True, return raw [mean, log_std] tensor for loss computation
         Returns:
-            Tuple of (mean, std) tensors each of shape (batch_size, 1)
+            If return_raw: Raw tensor of shape (batch_size, 2)
+            Otherwise: Tuple of (mean, std) tensors each of shape (batch_size, 1)
         """
         output = self.output_layer(inputs)
+        if return_raw:
+            return output
         mean, log_std = tf.split(output, 2, axis=-1)
         std = tf.nn.softplus(log_std) + 1e-6  # Ensure positive std
         return mean, std
@@ -297,7 +301,8 @@ class MultiProjectForecaster(keras.Model, BaseForecaster):
             training: Whether in training mode
 
         Returns:
-            Tuple of (mean, std) for Gaussian distribution
+            During training: Raw tensor of shape (batch, 2) containing [mean, log_std]
+            During inference: Tuple of (mean, std) tensors
         """
         seq_features, project_ids, trade_ids = inputs
 
@@ -316,9 +321,12 @@ class MultiProjectForecaster(keras.Model, BaseForecaster):
         adapted = self.adapter(fused, training=training)
 
         # Probabilistic output
-        mean, std = self.output_head(adapted)
-
-        return mean, std
+        # During training, return raw tensor for loss computation
+        # During inference, return (mean, std) tuple
+        if training:
+            return self.output_head(adapted, return_raw=True)
+        else:
+            return self.output_head(adapted, return_raw=False)
 
     def build_model(self):
         """Build model by running a forward pass with dummy data."""
@@ -383,6 +391,9 @@ class MultiProjectForecaster(keras.Model, BaseForecaster):
             ),
         ]
         if checkpoint_path:
+            # Ensure path ends with .weights.h5 for save_weights_only
+            if not checkpoint_path.endswith('.weights.h5'):
+                checkpoint_path = f"{checkpoint_path}.weights.h5"
             callbacks.append(
                 keras.callbacks.ModelCheckpoint(
                     checkpoint_path,

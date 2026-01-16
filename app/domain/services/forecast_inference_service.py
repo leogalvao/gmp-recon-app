@@ -341,7 +341,7 @@ class ForecastInferenceService:
         if not model_record:
             return None, None
 
-        model_dir = Path(model_record.model_path)
+        model_dir = Path(model_record.artifact_path)
         if not model_dir.exists():
             logger.error(f"Model path not found: {model_dir}")
             return None, None
@@ -352,10 +352,16 @@ class ForecastInferenceService:
 
         # Create and load model
         MultiProjectForecaster = get_multi_project_forecaster()
+        # Filter config to only include model parameters
+        model_params = {
+            k: v for k, v in metadata['config'].items()
+            if k in ['seq_len', 'feature_dim', 'project_embed_dim', 'trade_embed_dim',
+                     'lstm_units', 'adapter_units', 'dropout']
+        }
         model = MultiProjectForecaster(
             num_projects=len(metadata['id_mappings']['project_id_map']),
             num_trades=len(metadata['id_mappings']['trade_id_map']),
-            **metadata['config'],
+            **model_params,
         )
         model.load(str(model_dir))
 
@@ -368,10 +374,18 @@ class ForecastInferenceService:
 
     def _get_active_model_id(self) -> Optional[int]:
         """Get the active model ID."""
+        # First try production model
         model = self.db.query(MLModelRegistry).filter(
             MLModelRegistry.is_production == True,
-            MLModelRegistry.model_type == 'multi_project_forecaster',
+            MLModelRegistry.model_type == 'global',
         ).first()
+
+        # Fall back to most recent model if no production model
+        if not model:
+            model = self.db.query(MLModelRegistry).filter(
+                MLModelRegistry.model_type == 'global',
+            ).order_by(MLModelRegistry.created_at.desc()).first()
+
         return model.id if model else None
 
     def clear_cache(self):

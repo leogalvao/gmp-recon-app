@@ -131,7 +131,7 @@ class TrainingDatasetService:
             start_date=cutoff_date
         )
 
-        if not train_data or not train_data['sequences']:
+        if train_data is None or len(train_data['sequences']) == 0:
             logger.warning("No training sequences generated")
             return None, None, DatasetStats()
 
