@@ -69,6 +69,7 @@ class FeatureFlag:
 
     def __init__(self, name: str, config: Optional[FeatureFlagConfig] = None):
         self.name = name
+        self._default_config = config
 
         if name not in self._registry:
             # Create default config if not exists
@@ -79,6 +80,12 @@ class FeatureFlag:
 
     @property
     def config(self) -> FeatureFlagConfig:
+        # Re-create config if registry was cleared (e.g., by reset())
+        if self.name not in self._registry:
+            self._registry[self.name] = self._default_config or FeatureFlagConfig(
+                name=self.name,
+                description=f"Feature flag: {self.name}",
+            )
         return self._registry[self.name]
 
     def is_enabled(self, entity_id: Optional[int] = None) -> bool:

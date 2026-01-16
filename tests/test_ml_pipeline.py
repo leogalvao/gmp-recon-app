@@ -267,20 +267,18 @@ class TestFeatureFlags:
 
     def test_enable_for_project(self):
         """Test enabling all features for a project."""
-        from app.infrastructure.feature_flags import FeatureFlags, FeatureFlag
+        from app.infrastructure.feature_flags import FeatureFlags
 
-        # Reset first
-        FeatureFlag.reset()
+        # Use a unique project ID to avoid conflicts with other tests
+        test_project_id = 99999
 
-        # Re-initialize
-        from app.infrastructure import feature_flags
-        import importlib
-        importlib.reload(feature_flags)
+        FeatureFlags.enable_for_project(test_project_id)
 
-        FeatureFlags.enable_for_project(123)
+        assert FeatureFlags.MULTI_PROJECT_FORECASTING.is_enabled(test_project_id)
+        assert FeatureFlags.CANONICAL_TRADE_MAPPING.is_enabled(test_project_id)
 
-        assert FeatureFlags.MULTI_PROJECT_FORECASTING.is_enabled(123)
-        assert FeatureFlags.CANONICAL_TRADE_MAPPING.is_enabled(123)
+        # Clean up - disable for this project
+        FeatureFlags.disable_for_project(test_project_id)
 
 
 class TestCompatibilityLayer:
