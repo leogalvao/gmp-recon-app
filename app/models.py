@@ -462,9 +462,20 @@ class Project(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Multi-project platform fields (Phase 1)
+    total_square_feet = Column(Integer, nullable=True)  # For per-SF normalization
+    project_type = Column(String(50), nullable=True)  # commercial, residential, mixed
+    region = Column(String(50), nullable=True)  # Geographic region
+    owner_id = Column(Integer, nullable=True)  # For multi-owner scenarios
+    is_training_eligible = Column(Boolean, default=True)  # Include in global training
+    data_quality_score = Column(Float, nullable=True)  # 0.0-1.0
+
     # Relationships
     gmps = relationship("GMP", back_populates="project", cascade="all, delete-orphan")
     training_rounds = relationship("TrainingRound", back_populates="project", cascade="all, delete-orphan")
+    trade_mappings = relationship("ProjectTradeMapping", back_populates="project", cascade="all, delete-orphan")
+    canonical_cost_features = relationship("CanonicalCostFeature", back_populates="project", cascade="all, delete-orphan")
+    project_forecasts = relationship("ProjectForecast", back_populates="project", cascade="all, delete-orphan")
 
 
 # =============================================================================
@@ -490,10 +501,15 @@ class GMP(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Multi-project platform fields (Phase 1)
+    canonical_trade_id = Column(Integer, nullable=True)  # FK to canonical_trades
+    normalized_amount_per_sf_cents = Column(Integer, nullable=True)  # For cross-project comparison
+
     # Relationships
     project = relationship("Project", back_populates="gmps")
     budgets = relationship("BudgetEntity", back_populates="gmp", cascade="all, delete-orphan")
     change_orders = relationship("ChangeOrder", back_populates="gmp", cascade="all, delete-orphan")
+    canonical_trade = relationship("CanonicalTrade", back_populates="gmp_entities")
 
     __table_args__ = (
         UniqueConstraint('project_id', 'division', 'zone', name='uq_project_division_zone'),
@@ -780,6 +796,219 @@ class ScheduleToGMPMapping(Base):
 
     __table_args__ = (
         UniqueConstraint('schedule_activity_id', 'gmp_division', name='uq_schedule_gmp'),
+    )
+
+
+# =============================================================================
+# Multi-Project Platform Tables (Phase 1)
+# =============================================================================
+
+class CanonicalTrade(Base):
+    """
+    Master trade taxonomy (CSI-based).
+    Portfolio-wide canonical codes for cross-project normalization.
+    """
+    __tablename__ = 'canonical_trades'
+
+    id = Column(Integer, primary_key=True, index=True)
+    canonical_code = Column(String(20), unique=True, nullable=False, index=True)  # e.g., "03-CONCRETE"
+    csi_division = Column(String(2), nullable=False, index=True)  # e.g., "03"
+    canonical_name = Column(String(200), nullable=False)  # e.g., "Concrete Work"
+    parent_trade_id = Column(Integer, ForeignKey('canonical_trades.id'), nullable=True)
+    hierarchy_level = Column(Integer, nullable=False, default=1)  # 1=Division, 2=Subdivision, 3=Detail
+    typical_pct_of_total = Column(Float, nullable=True)  # Historical average % of GMP
+    typical_duration_pct = Column(Float, nullable=True)  # Typical % of project duration
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    parent_trade = relationship("CanonicalTrade", remote_side=[id], backref="child_trades")
+    project_mappings = relationship("ProjectTradeMapping", back_populates="canonical_trade")
+    gmp_entities = relationship("GMP", back_populates="canonical_trade")
+    cost_features = relationship("CanonicalCostFeature", back_populates="canonical_trade")
+    project_forecasts = relationship("ProjectForecast", back_populates="canonical_trade")
+
+
+class ProjectTradeMapping(Base):
+    """
+    Project-to-canonical trade mapping.
+    Maps project-specific division names to canonical trades.
+    """
+    __tablename__ = 'project_trade_mappings'
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False, index=True)
+    raw_division_name = Column(String(200), nullable=False)  # Original name from project
+    canonical_trade_id = Column(Integer, ForeignKey('canonical_trades.id'), nullable=False, index=True)
+    confidence = Column(Float, default=1.0)  # Mapping confidence
+    mapping_method = Column(String(30), nullable=False)  # 'manual', 'fuzzy', 'exact'
+    created_by = Column(String(100), default='system')
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("Project", back_populates="trade_mappings")
+    canonical_trade = relationship("CanonicalTrade", back_populates="project_mappings")
+
+    __table_args__ = (
+        UniqueConstraint('project_id', 'raw_division_name', name='uq_project_raw_division'),
+    )
+
+
+class CanonicalCostFeature(Base):
+    """
+    Normalized cost features in canonical schema.
+    Per-SF costs for cross-project ML training.
+    """
+    __tablename__ = 'canonical_cost_features'
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False, index=True)
+    canonical_trade_id = Column(Integer, ForeignKey('canonical_trades.id'), nullable=False, index=True)
+    period_date = Column(Date, nullable=False, index=True)
+    period_type = Column(String(10), nullable=False)  # 'weekly', 'monthly'
+
+    # Normalized cost metrics (per square foot)
+    cost_per_sf_cents = Column(Integer, nullable=False)  # Actual cost / project SF
+    cumulative_cost_per_sf_cents = Column(Integer, nullable=False)
+    budget_per_sf_cents = Column(Integer, nullable=False)
+
+    # Progress metrics
+    pct_complete = Column(Float, nullable=True)  # 0.0-1.0
+    schedule_pct_elapsed = Column(Float, nullable=True)  # Time elapsed / duration
+
+    # Regional splits (normalized)
+    pct_east = Column(Float, default=0.5)
+    pct_west = Column(Float, default=0.5)
+
+    # Metadata
+    is_backfill = Column(Boolean, default=False)  # Historical vs. real-time
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("Project", back_populates="canonical_cost_features")
+    canonical_trade = relationship("CanonicalTrade", back_populates="cost_features")
+
+    __table_args__ = (
+        UniqueConstraint(
+            'project_id', 'canonical_trade_id', 'period_date', 'period_type',
+            name='uq_canonical_cost_lookup'
+        ),
+    )
+
+
+class ProjectEmbedding(Base):
+    """
+    Project embeddings for ML.
+    Learned project representation for hierarchical models.
+    """
+    __tablename__ = 'project_embeddings'
+
+    project_id = Column(Integer, ForeignKey('projects.id'), primary_key=True)
+    embedding_vector = Column(Text, nullable=False)  # JSON array of floats
+    model_version = Column(String(50), nullable=False)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationship
+    project = relationship("Project")
+
+
+class TrainingDataset(Base):
+    """
+    Cross-project training dataset metadata.
+    Tracks datasets used for global model training.
+    """
+    __tablename__ = 'training_datasets'
+
+    id = Column(Integer, primary_key=True, index=True)
+    dataset_name = Column(String(100), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    project_ids = Column(Text, nullable=False)  # JSON array of project IDs
+    canonical_trade_ids = Column(Text, nullable=True)  # JSON array (null = all)
+    date_range_start = Column(Date, nullable=False)
+    date_range_end = Column(Date, nullable=False)
+    sample_count = Column(Integer, nullable=False)
+    feature_schema = Column(Text, nullable=False)  # JSON schema definition
+    storage_path = Column(String(500), nullable=False)  # S3/local path
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    models = relationship("MLModelRegistry", back_populates="training_dataset")
+
+
+class MLModelRegistry(Base):
+    """
+    Model registry for versioned ML models.
+    Tracks global and project-specific models.
+    """
+    __tablename__ = 'model_registry'
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_name = Column(String(100), nullable=False)
+    model_version = Column(String(50), nullable=False)
+    model_type = Column(String(50), nullable=False)  # 'global', 'project_finetuned', 'trade_specific'
+    scope_project_id = Column(Integer, ForeignKey('projects.id'), nullable=True)  # NULL for global
+    scope_canonical_trade_id = Column(Integer, ForeignKey('canonical_trades.id'), nullable=True)  # NULL for all-trade
+    training_dataset_id = Column(Integer, ForeignKey('training_datasets.id'), nullable=True)
+    artifact_path = Column(String(500), nullable=False)
+    metrics = Column(Text, nullable=False)  # JSON metrics (MAE, MAPE, coverage, etc.)
+    hyperparameters = Column(Text, nullable=True)  # JSON hyperparams
+    is_production = Column(Boolean, default=False)
+    promoted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    scope_project = relationship("Project")
+    scope_trade = relationship("CanonicalTrade")
+    training_dataset = relationship("TrainingDataset", back_populates="models")
+    forecasts = relationship("ProjectForecast", back_populates="model")
+
+    __table_args__ = (
+        UniqueConstraint('model_name', 'model_version', name='uq_model_name_version'),
+    )
+
+
+class ProjectForecast(Base):
+    """
+    Per-project forecasts with isolation.
+    Stores ML-generated predictions per project and trade.
+    """
+    __tablename__ = 'project_forecasts'
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False, index=True)
+    canonical_trade_id = Column(Integer, ForeignKey('canonical_trades.id'), nullable=False, index=True)
+    model_id = Column(Integer, ForeignKey('model_registry.id'), nullable=False)
+    forecast_date = Column(Date, nullable=False, index=True)
+    horizon_months = Column(Integer, nullable=False)
+
+    # Predictions (in cents)
+    predicted_eac_cents = Column(Integer, nullable=False)
+    predicted_etc_cents = Column(Integer, nullable=False)
+    confidence_lower_cents = Column(Integer, nullable=True)
+    confidence_upper_cents = Column(Integer, nullable=True)
+    confidence_level = Column(Float, default=0.8)
+
+    # Regional breakdown
+    eac_east_cents = Column(Integer, nullable=True)
+    eac_west_cents = Column(Integer, nullable=True)
+
+    # Metadata
+    is_current = Column(Boolean, default=True, index=True)
+    superseded_by_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("Project", back_populates="project_forecasts")
+    canonical_trade = relationship("CanonicalTrade", back_populates="project_forecasts")
+    model = relationship("MLModelRegistry", back_populates="forecasts")
+
+    __table_args__ = (
+        UniqueConstraint(
+            'project_id', 'canonical_trade_id', 'forecast_date', 'model_id',
+            name='uq_project_trade_forecast_model'
+        ),
     )
 
 
