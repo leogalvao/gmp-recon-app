@@ -40,6 +40,7 @@ data/*.csv
 .cache/
 *.cache
 .venv311/
+.config_snapshots/
 =2.15.0
 best_lstm_model.keras
 
