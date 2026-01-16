@@ -167,17 +167,31 @@ class CompatibilityLayer:
 
     def _get_forecast_from_legacy_system(self, project_id: int) -> List[Dict[str, Any]]:
         """Get forecasts from legacy ForecastSnapshot system."""
-        # Get latest forecast snapshot
-        snapshot = self.db.query(ForecastSnapshot).filter(
-            ForecastSnapshot.project_id == project_id
-        ).order_by(ForecastSnapshot.snapshot_date.desc()).first()
+        # Get GMP divisions for this project
+        gmps = self.db.query(GMP).filter(GMP.project_id == project_id).all()
 
-        if not snapshot:
+        if not gmps:
             return []
 
-        # Convert snapshot data to list format
-        # (Assuming ForecastSnapshot stores per-division data)
-        return snapshot.forecast_data if hasattr(snapshot, 'forecast_data') else []
+        gmp_divisions = [gmp.division for gmp in gmps]
+
+        # Get latest forecast snapshots for these divisions
+        forecasts = []
+        for division in gmp_divisions:
+            snapshot = self.db.query(ForecastSnapshot).filter(
+                ForecastSnapshot.gmp_division == division
+            ).order_by(ForecastSnapshot.snapshot_date.desc()).first()
+
+            if snapshot:
+                forecasts.append({
+                    'gmp_division': snapshot.gmp_division,
+                    'eac_cents': snapshot.eac_cents,
+                    'etc_cents': snapshot.etc_cents,
+                    'confidence_score': snapshot.confidence_score,
+                    'method': snapshot.method,
+                })
+
+        return forecasts
 
     def _score_to_band(self, cv: float) -> str:
         """Convert coefficient of variation to confidence band."""

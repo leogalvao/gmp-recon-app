@@ -369,7 +369,7 @@ class ForecastInferenceService:
     def _get_active_model_id(self) -> Optional[int]:
         """Get the active model ID."""
         model = self.db.query(MLModelRegistry).filter(
-            MLModelRegistry.is_active == True,
+            MLModelRegistry.is_production == True,
             MLModelRegistry.model_type == 'multi_project_forecaster',
         ).first()
         return model.id if model else None

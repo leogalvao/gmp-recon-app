@@ -17,6 +17,9 @@ from .forecast_inference_service import ForecastInferenceService, ProjectForecas
 # Phase 4 - Integration services
 from .leakage_prevention import LeakagePreventionService, TemporalLeakageValidator, CrossProjectLeakageValidator
 from .compatibility_layer import CompatibilityLayer, ProjectCutoverService, CutoverResult
+# Phase 5 - Cutover and monitoring services
+from .monitoring_service import MonitoringService, Alert, AlertSeverity, AlertType, HealthCheckResult, DriftReport
+from .rollback_service import RollbackService, RollbackResult, RollbackReason, RollbackEvent
 
 __all__ = [
     'CostMapper',
@@ -52,4 +55,15 @@ __all__ = [
     'CompatibilityLayer',
     'ProjectCutoverService',
     'CutoverResult',
+    # Phase 5 - Cutover and monitoring services
+    'MonitoringService',
+    'Alert',
+    'AlertSeverity',
+    'AlertType',
+    'HealthCheckResult',
+    'DriftReport',
+    'RollbackService',
+    'RollbackResult',
+    'RollbackReason',
+    'RollbackEvent',
 ]

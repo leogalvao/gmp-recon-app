@@ -994,6 +994,9 @@ class ProjectForecast(Base):
     eac_east_cents = Column(Integer, nullable=True)
     eac_west_cents = Column(Integer, nullable=True)
 
+    # Actuals (populated when final values are known, for model monitoring)
+    actual_eac_cents = Column(Integer, nullable=True)
+
     # Metadata
     is_current = Column(Boolean, default=True, index=True)
     superseded_by_id = Column(Integer, nullable=True)
