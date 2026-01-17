@@ -1,13 +1,22 @@
 # GMP Reconciliation App Dependencies
 # See DEPENDENCY_AUDIT.md for full analysis
+# Last audit: 2026-01-17
 
 # ============================================
-# Security-Critical Minimum Versions
+# Security-Critical Minimum Versions (REQUIRED)
 # ============================================
-# These packages must be upgraded before others to fix known vulnerabilities
-# Run: pip install --upgrade pip setuptools wheel cryptography urllib3
-# cryptography>=43.0.1  # CVE-2023-50782, CVE-2024-0727, PYSEC-2024-225
-# urllib3>=2.6.3        # CVE-2026-21441 (decompression bomb)
+# These packages are transitive dependencies with known vulnerabilities.
+# Pin them explicitly to ensure secure versions are installed.
+# Run first: pip install --upgrade pip setuptools wheel
+
+# CVE-2023-50782, CVE-2024-0727, PYSEC-2024-225, GHSA-h4gh-qq45-vh27
+cryptography>=43.0.1
+
+# CVE-2024-6345 (RCE), PYSEC-2025-49 (path traversal)
+setuptools>=78.1.1
+
+# CVE-2026-21441 (decompression bomb in redirect handling)
+urllib3>=2.6.3
 
 # ============================================
 # Core Dependencies (Required)
@@ -69,7 +78,9 @@ pytest>=7.0.0
 #   pip install tensorflow>=2.15.0  # For LSTM/Transformer forecasting (~500MB)
 #   pip install torch>=2.0.0        # For MLP model alternative (~2GB)
 
-# LSTM/Transformer forecasting models (app/forecasting/)
+# LSTM/Transformer forecasting models (app/forecasting/, src/models/, cli.py)
+# NOTE: Required for advanced forecasting features. Comment out for ~500MB savings
+# if you only need basic reconciliation features.
 tensorflow>=2.15.0
 
 # Optional MLP model with PyTorch fallback (app/modules/ml.py)
