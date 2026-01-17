@@ -1,34 +1,37 @@
 # Dependency Audit Report
 
-**Date:** 2026-01-09
+**Date:** 2026-01-17 (Updated)
+**Previous Audit:** 2026-01-09
 **Audited by:** Claude Code
 
 ## Executive Summary
 
-This audit identified **4 security vulnerabilities**, **1 unused dependency**, and significant **optimization opportunities** to reduce the install footprint by ~80% for users who don't need ML features.
+This audit identified **7 security vulnerabilities** in 3 packages, **1 unused dependency** (removed), and significant **optimization opportunities** to reduce the install footprint by ~80% for users who don't need ML features.
+
+**Status:** Security constraints have been added to `requirements.txt` to enforce minimum secure versions.
 
 ## Security Vulnerabilities (Critical)
 
-| Package | Current | Fixed Version | CVEs |
-|---------|---------|---------------|------|
-| `cryptography` | 41.0.7 | **≥43.0.1** | CVE-2023-50782, CVE-2024-0727, PYSEC-2024-225, GHSA-h4gh-qq45-vh27 |
-| `setuptools` | 68.1.2 | **≥78.1.1** | CVE-2024-6345 (RCE), PYSEC-2025-49 (path traversal) |
-| `pip` | 24.0 | **≥25.3** | CVE-2025-8869 (tar symlink attack) |
-| `urllib3` | 2.6.1 | **≥2.6.3** | CVE-2026-21441 (decompression bomb) |
+| Package | System Version | Fixed Version | CVEs | Status |
+|---------|----------------|---------------|------|--------|
+| `cryptography` | 41.0.7 | **≥43.0.1** | CVE-2023-50782, CVE-2024-0727, PYSEC-2024-225, GHSA-h4gh-qq45-vh27 | ✅ Pinned |
+| `setuptools` | 68.1.2 | **≥78.1.1** | CVE-2024-6345 (RCE), PYSEC-2025-49 (path traversal) | ✅ Pinned |
+| `pip` | 24.0 | **≥25.3** | CVE-2025-8869 (tar symlink attack) | ⚠️ Manual upgrade needed |
+| `urllib3` | 2.6.3 | **≥2.6.3** | CVE-2026-21441 (decompression bomb) | ✅ Already fixed |
 
 ### Recommended Actions
-1. Upgrade `cryptography>=43.0.1` - Fixes NULL pointer dereference, RSA key exchange flaw
-2. Upgrade `setuptools>=78.1.1` - Fixes remote code execution via path traversal
-3. Upgrade `pip>=25.3` before installing other packages
-4. Upgrade `urllib3>=2.6.3` - Fixes decompression bomb in redirect handling
+1. ✅ `cryptography>=43.0.1` - Added to requirements.txt
+2. ✅ `setuptools>=78.1.1` - Added to requirements.txt
+3. ⚠️ `pip>=25.3` - Run `pip install --upgrade pip` before installing other packages
+4. ✅ `urllib3>=2.6.3` - Added to requirements.txt
 
 ## Unused Dependencies
 
 | Package | Status | Evidence |
 |---------|--------|----------|
-| `mlflow>=2.8.0` | **UNUSED** | No imports found (`import mlflow`, `from mlflow`, `mlflow.`) |
+| `mlflow>=2.8.0` | ✅ **REMOVED** | No imports found (`import mlflow`, `from mlflow`, `mlflow.`) |
 
-**Recommendation:** Remove `mlflow` entirely. Saves ~150MB+ of transitive dependencies.
+**Status:** `mlflow` has been removed from requirements.txt. Saved ~150MB+ of transitive dependencies.
 
 ## Dependency Bloat Analysis
 
@@ -155,12 +158,23 @@ httpx>=0.25.0
 
 ## Action Items
 
-1. **Immediate:** Remove `mlflow>=2.8.0` (unused)
-2. **Immediate:** Add security minimum versions
-3. **Short-term:** Move `tensorflow` and `torch` to optional extras
-4. **Short-term:** Create separate `requirements-dev.txt` for test deps
-5. **Medium-term:** Consider migrating to `pyproject.toml` for modern dependency management
+1. ✅ **Immediate:** Remove `mlflow>=2.8.0` (unused) - **DONE**
+2. ✅ **Immediate:** Add security minimum versions - **DONE** (cryptography, setuptools, urllib3 pinned)
+3. ⚠️ **Short-term:** Move `tensorflow` and `torch` to optional extras - `torch` commented, `tensorflow` documented
+4. 📋 **Short-term:** Create separate `requirements-dev.txt` for test deps
+5. 📋 **Medium-term:** Consider migrating to `pyproject.toml` for modern dependency management
+
+## Installation Notes
+
+Before installing dependencies, upgrade pip to fix CVE-2025-8869:
+```bash
+pip install --upgrade pip>=25.3
+pip install -r requirements.txt
+```
+
+For minimal install (no advanced ML features), comment out `tensorflow>=2.15.0` in requirements.txt to save ~500MB.
 
 ## Files Modified
 
-- `requirements.txt` - Updated with security fixes and removed unused deps
+- `requirements.txt` - Updated with security fixes, explicit version constraints, and removed unused deps
+- `DEPENDENCY_AUDIT.md` - Updated with audit findings and status
