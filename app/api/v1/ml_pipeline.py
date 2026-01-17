@@ -274,13 +274,13 @@ def list_models(
     return [
         {
             'id': m.id,
-            'name': m.name,
-            'version': m.version,
+            'name': m.model_name,
+            'version': m.model_version,
             'model_type': m.model_type,
             'created_at': m.created_at.isoformat() if m.created_at else None,
-            'is_active': m.is_active,
-            'metrics': json.loads(m.metrics_json) if m.metrics_json else None,
-            'model_path': m.model_path,
+            'is_active': m.is_production,
+            'metrics': json.loads(m.metrics) if m.metrics else None,
+            'model_path': m.artifact_path,
         }
         for m in models
     ]
@@ -308,13 +308,13 @@ def get_model(
     import json
     return {
         'id': model.id,
-        'name': model.name,
-        'version': model.version,
+        'name': model.model_name,
+        'version': model.model_version,
         'model_type': model.model_type,
         'created_at': model.created_at.isoformat() if model.created_at else None,
-        'is_active': model.is_active,
-        'metrics': json.loads(model.metrics_json) if model.metrics_json else None,
-        'model_path': model.model_path,
+        'is_active': model.is_production,
+        'metrics': json.loads(model.metrics) if model.metrics else None,
+        'model_path': model.artifact_path,
     }
 
 

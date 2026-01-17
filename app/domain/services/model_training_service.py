@@ -444,24 +444,24 @@ class ModelTrainingService:
             query = query.filter(MLModelRegistry.model_type == model_type)
 
         if not include_inactive:
-            query = query.filter(MLModelRegistry.is_active == True)
+            query = query.filter(MLModelRegistry.is_production == True)
 
         return query.order_by(MLModelRegistry.created_at.desc()).all()
 
     def set_active_model(self, model_id: int) -> bool:
-        """Set a specific model version as active."""
+        """Set a specific model version as active (production)."""
         model = self.db.query(MLModelRegistry).get(model_id)
         if not model:
             return False
 
         # Deactivate others with same name
         self.db.query(MLModelRegistry).filter(
-            MLModelRegistry.name == model.name,
-        ).update({'is_active': False})
+            MLModelRegistry.model_name == model.model_name,
+        ).update({'is_production': False})
 
         # Activate this one
-        model.is_active = True
+        model.is_production = True
         self.db.commit()
 
-        logger.info(f"Set model {model_id} as active")
+        logger.info(f"Set model {model_id} as production")
         return True
