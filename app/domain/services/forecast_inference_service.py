@@ -273,7 +273,7 @@ class ForecastInferenceService:
     def save_forecast(
         self,
         forecast_result: ProjectForecastResult,
-    ) -> int:
+    ) -> List[int]:
         """
         Save a forecast result to the database.
 
@@ -281,31 +281,39 @@ class ForecastInferenceService:
             forecast_result: Forecast to save
 
         Returns:
-            Forecast record ID
+            List of forecast record IDs
         """
         # Get model ID
         model_record = self.db.query(MLModelRegistry).filter(
-            MLModelRegistry.version == forecast_result.model_version
+            MLModelRegistry.model_version == forecast_result.model_version
         ).first()
 
-        record = ProjectForecast(
-            project_id=forecast_result.project_id,
-            model_id=model_record.id if model_record else None,
-            forecast_date=forecast_result.as_of_date,
-            forecast_horizon_months=1,
-            predicted_eac_cents=int(forecast_result.total_forecasted_eac * 100),
-            confidence_lower_cents=int(forecast_result.total_forecast_lower * 100),
-            confidence_upper_cents=int(forecast_result.total_forecast_upper * 100),
-            confidence_level=forecast_result.confidence_level,
-            actual_eac_cents=None,  # To be filled when actuals are available
-            created_at=date.today(),
-        )
-        self.db.add(record)
-        self.db.flush()
+        model_id = model_record.id if model_record else 1  # Default to 1 if not found
 
-        logger.info(f"Saved forecast {record.id} for project {forecast_result.project_id}")
+        record_ids = []
+        for trade_forecast in forecast_result.trade_forecasts:
+            # Calculate ETC (Estimate to Complete) = EAC - Current Cumulative
+            etc = trade_forecast.forecasted_eac - trade_forecast.current_cumulative_cost
 
-        return record.id
+            record = ProjectForecast(
+                project_id=forecast_result.project_id,
+                canonical_trade_id=trade_forecast.canonical_trade_id,
+                model_id=model_id,
+                forecast_date=forecast_result.as_of_date,
+                horizon_months=1,
+                predicted_eac_cents=int(trade_forecast.forecasted_eac * 100),
+                predicted_etc_cents=int(etc * 100),
+                confidence_lower_cents=int(trade_forecast.forecast.lower_bound * 100),
+                confidence_upper_cents=int(trade_forecast.forecast.upper_bound * 100),
+                confidence_level=forecast_result.confidence_level,
+            )
+            self.db.add(record)
+            self.db.flush()
+            record_ids.append(record.id)
+
+        logger.info(f"Saved {len(record_ids)} forecasts for project {forecast_result.project_id}")
+
+        return record_ids
 
     def get_historical_forecasts(
         self,
