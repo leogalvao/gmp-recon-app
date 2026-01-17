@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block title %}Sign In - GMP Reconciliation{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* Hide nav and footer on login page */
+    nav, footer { display: none !important; }
+    main {
+        max-width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center px-4 py-12">
+    <div class="max-w-md w-full space-y-8">
+        <!-- Header -->
+        <div class="text-center">
+            <div class="mx-auto h-16 w-16 flex items-center justify-center rounded-full bg-white shadow-lg">
+                <svg class="h-10 w-10 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"></path>
+                </svg>
+            </div>
+            <h2 class="mt-6 text-3xl font-extrabold text-white">
+                GMP Reconciliation
+            </h2>
+            <p class="mt-2 text-sm text-indigo-200">
+                Sign in to your account
+            </p>
+        </div>
+
+        <!-- Error Alert -->
+        <div id="error-alert" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative" role="alert">
+            <span id="error-message" class="block sm:inline"></span>
+        </div>
+
+        <!-- Login Form -->
+        <div class="bg-white rounded-xl shadow-2xl p-8">
+            <form id="login-form" class="space-y-6">
+                <div>
+                    <label for="email" class="form-label">Email address</label>
+                    <input id="email" name="email" type="email" autocomplete="email" required
+                           class="form-input mt-1" placeholder="you@example.com">
+                </div>
+
+                <div>
+                    <label for="password" class="form-label">Password</label>
+                    <input id="password" name="password" type="password" autocomplete="current-password" required
+                           class="form-input mt-1" placeholder="Enter your password">
+                </div>
+
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <input id="remember-me" name="remember-me" type="checkbox"
+                               class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+                        <label for="remember-me" class="ml-2 block text-sm text-gray-700">
+                            Remember me
+                        </label>
+                    </div>
+                </div>
+
+                <div>
+                    <button type="submit" id="submit-btn"
+                            class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors">
+                        <span id="btn-text">Sign in</span>
+                        <svg id="btn-spinner" class="hidden animate-spin ml-2 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+
+            <div class="mt-6">
+                <div class="relative">
+                    <div class="absolute inset-0 flex items-center">
+                        <div class="w-full border-t border-gray-300"></div>
+                    </div>
+                    <div class="relative flex justify-center text-sm">
+                        <span class="px-2 bg-white text-gray-500">New to GMP Reconciliation?</span>
+                    </div>
+                </div>
+
+                <div class="mt-6">
+                    <a href="/register"
+                       class="w-full flex justify-center py-3 px-4 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors">
+                        Create an account
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <p class="text-center text-sm text-indigo-200">
+            &copy; {{ now().year if now is defined else '2025' }} GMP Reconciliation App
+        </p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('login-form');
+    const errorAlert = document.getElementById('error-alert');
+    const errorMessage = document.getElementById('error-message');
+    const submitBtn = document.getElementById('submit-btn');
+    const btnText = document.getElementById('btn-text');
+    const btnSpinner = document.getElementById('btn-spinner');
+
+    // Check if already logged in
+    const token = localStorage.getItem('access_token');
+    if (token) {
+        window.location.href = '/dashboard';
+        return;
+    }
+
+    function showError(message) {
+        errorMessage.textContent = message;
+        errorAlert.classList.remove('hidden');
+    }
+
+    function hideError() {
+        errorAlert.classList.add('hidden');
+    }
+
+    function setLoading(loading) {
+        submitBtn.disabled = loading;
+        if (loading) {
+            btnText.textContent = 'Signing in...';
+            btnSpinner.classList.remove('hidden');
+        } else {
+            btnText.textContent = 'Sign in';
+            btnSpinner.classList.add('hidden');
+        }
+    }
+
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        hideError();
+        setLoading(true);
+
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        const rememberMe = document.getElementById('remember-me').checked;
+
+        try {
+            const formData = new URLSearchParams();
+            formData.append('username', email);
+            formData.append('password', password);
+
+            const response = await fetch('/api/v1/auth/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                if (rememberMe) {
+                    localStorage.setItem('access_token', data.access_token);
+                } else {
+                    sessionStorage.setItem('access_token', data.access_token);
+                }
+                window.location.href = '/dashboard';
+            } else {
+                showError(data.detail || 'Invalid email or password');
+            }
+        } catch (error) {
+            console.error('Login error:', error);
+            showError('An error occurred. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    });
+});
+</script>
+{% endblock %}

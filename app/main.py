@@ -371,6 +371,55 @@ async def root():
     return RedirectResponse(url="/dashboard")
 
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Login page."""
+    context = get_template_context(request)
+    return templates.TemplateResponse("login.html", context)
+
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    """Registration page."""
+    context = get_template_context(request)
+    return templates.TemplateResponse("register.html", context)
+
+
+@app.get("/logout", response_class=HTMLResponse)
+async def logout_page(request: Request):
+    """Logout - clears token and redirects to login."""
+    return HTMLResponse(content="""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Logging out...</title>
+        <script>
+            localStorage.removeItem('access_token');
+            sessionStorage.removeItem('access_token');
+            window.location.href = '/login';
+        </script>
+    </head>
+    <body><p>Logging out...</p></body>
+    </html>
+    """)
+
+
+@app.get("/api/projects", response_class=JSONResponse)
+async def list_projects(db: Session = Depends(get_db)):
+    """List all projects for the project selector."""
+    from app.models import Project
+    projects = db.query(Project).filter(Project.is_active == True).all()
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "code": p.code,
+            "is_training_eligible": p.is_training_eligible if hasattr(p, 'is_training_eligible') else True
+        }
+        for p in projects
+    ]
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request, db: Session = Depends(get_db)):
     """Project dashboard with overview metrics and division summaries."""

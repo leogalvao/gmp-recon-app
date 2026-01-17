@@ -311,10 +311,30 @@
     <nav class="bg-white shadow-sm sticky top-0 z-50" role="navigation" aria-label="Main navigation">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
-                <div class="flex items-center">
+                <div class="flex items-center space-x-4">
                     <a href="/dashboard" class="flex items-center">
                         <span class="text-lg font-medium text-gray-700">GMP Reconciliation</span>
                     </a>
+                    <!-- Project Selector -->
+                    <div class="relative" id="project-selector-container">
+                        <button type="button" id="project-selector-btn"
+                                class="flex items-center space-x-2 px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                            </svg>
+                            <span id="current-project-name">Select Project</span>
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </button>
+                        <div id="project-dropdown" class="hidden absolute left-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                            <div class="p-2">
+                                <div id="project-list" class="max-h-64 overflow-y-auto">
+                                    <div class="text-sm text-gray-500 p-2">Loading projects...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="flex items-center space-x-2">
@@ -381,6 +401,15 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
                             </svg>
                             <span>Settings</span>
+                        </span>
+                    </a>
+                    <div class="border-l border-gray-200 h-6 mx-2"></div>
+                    <a href="/logout" class="nav-link text-gray-500 hover:text-red-600" title="Sign out">
+                        <span class="flex items-center space-x-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                            </svg>
+                            <span>Logout</span>
                         </span>
                     </a>
                 </div>
@@ -650,6 +679,107 @@
         window.setButtonLoading = setButtonLoading;
         window.resetButtonLoading = resetButtonLoading;
         window.debounce = debounce;
+
+        // =============================================
+        // Project Selector
+        // =============================================
+        const PROJECT_STORAGE_KEY = 'gmp_current_project_id';
+
+        function getCurrentProjectId() {
+            return localStorage.getItem(PROJECT_STORAGE_KEY) || '1';
+        }
+
+        function setCurrentProjectId(projectId) {
+            localStorage.setItem(PROJECT_STORAGE_KEY, projectId);
+            window.dispatchEvent(new CustomEvent('projectChanged', { detail: { projectId } }));
+        }
+
+        async function loadProjects() {
+            const projectList = document.getElementById('project-list');
+            const currentProjectName = document.getElementById('current-project-name');
+            if (!projectList) return;
+
+            try {
+                const response = await fetch('/api/projects');
+                if (!response.ok) throw new Error('Failed to load projects');
+                const projects = await response.json();
+
+                if (projects.length === 0) {
+                    projectList.innerHTML = '<div class="text-sm text-gray-500 p-2">No projects found</div>';
+                    return;
+                }
+
+                const currentId = getCurrentProjectId();
+                let currentProject = projects.find(p => p.id.toString() === currentId) || projects[0];
+
+                // Update button text
+                if (currentProjectName) {
+                    currentProjectName.textContent = currentProject.name;
+                }
+
+                // Build dropdown list
+                projectList.innerHTML = projects.map(p => `
+                    <button type="button"
+                            class="w-full text-left px-3 py-2 text-sm rounded-md transition-colors
+                                   ${p.id.toString() === currentId ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-gray-100 text-gray-700'}"
+                            data-project-id="${p.id}"
+                            data-project-name="${escapeHtml(p.name)}">
+                        <div class="flex items-center justify-between">
+                            <span class="font-medium">${escapeHtml(p.name)}</span>
+                            <span class="text-xs text-gray-400">${escapeHtml(p.code)}</span>
+                        </div>
+                        ${p.is_training_eligible ? '<span class="text-xs text-green-600">ML Enabled</span>' : ''}
+                    </button>
+                `).join('');
+
+                // Add click handlers
+                projectList.querySelectorAll('button').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const projectId = btn.dataset.projectId;
+                        const projectName = btn.dataset.projectName;
+                        setCurrentProjectId(projectId);
+                        if (currentProjectName) currentProjectName.textContent = projectName;
+                        document.getElementById('project-dropdown')?.classList.add('hidden');
+                        // Reload page to reflect new project
+                        window.location.reload();
+                    });
+                });
+
+            } catch (error) {
+                console.error('Error loading projects:', error);
+                projectList.innerHTML = '<div class="text-sm text-red-500 p-2">Failed to load projects</div>';
+            }
+        }
+
+        // Project selector dropdown toggle
+        document.addEventListener('DOMContentLoaded', function() {
+            const btn = document.getElementById('project-selector-btn');
+            const dropdown = document.getElementById('project-dropdown');
+
+            if (btn && dropdown) {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    dropdown.classList.toggle('hidden');
+                    if (!dropdown.classList.contains('hidden')) {
+                        loadProjects();
+                    }
+                });
+
+                // Close dropdown when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!dropdown.contains(e.target) && !btn.contains(e.target)) {
+                        dropdown.classList.add('hidden');
+                    }
+                });
+            }
+
+            // Load initial project name
+            loadProjects();
+        });
+
+        // Make project functions globally available
+        window.getCurrentProjectId = getCurrentProjectId;
+        window.setCurrentProjectId = setCurrentProjectId;
     </script>
 
     <!-- Footer -->
